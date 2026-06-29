@@ -58,11 +58,20 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   transition:transform .1s,box-shadow .1s;touch-action:manipulation;
 }
 #btn-play:active{transform:translateY(4px);box-shadow:0 2px 0 #9d2700;}
+
+#mapdisp{
+  position:fixed;top:14px;right:14px;z-index:50;
+  background:rgba(255,250,230,.95);border:3px solid #b8860b;
+  border-radius:20px;padding:8px 18px;
+  font:700 clamp(14px,3.5vw,22px)/1 Georgia,serif;
+  color:#5d3200;box-shadow:0 3px 14px rgba(0,0,0,.18);
+}
 </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
 <div id="hud">🧺 <span id="cnt">0</span> / <span id="tot">?</span></div>
+<div id="mapdisp">Map <span id="mapnum">1</span></div>
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
 <div id="win" role="dialog" aria-modal="true" aria-labelledby="wm-label">
@@ -119,50 +128,105 @@ const P = {
   mm_g:   '#4a8828', mm_w:   '#3898c0', mm_h:   '#8898b0',
 };
 
-// ── World data ────────────────────────────────────────────────
-const WATER_DEF = [
-  {x:.62,y:.45,rx:.09,ry:.065},
-  {x:.22,y:.74,rx:.055,ry:.040},
-  {x:.45,y:.28,rx:.030,ry:.025},
-  {x:.82,y:.62,rx:.028,ry:.022},
-  {x:.10,y:.35,rx:.040,ry:.032},
-];
-const RIVERS = [
-  [{x:.48,y:0},{x:.50,y:.10},{x:.52,y:.20},{x:.55,y:.30},{x:.58,y:.38},{x:.62,y:.45}],
-  [{x:.65,y:.48},{x:.68,y:.56},{x:.72,y:.64},{x:.75,y:.72},{x:.78,y:.80}],
-  [{x:0,y:.42},{x:.05,y:.40},{x:.10,y:.37},{x:.10,y:.35}],
-];
-const MOUNT_DEF = [
-  {x:.72,y:.08,s:.9},{x:.80,y:.12,s:.75},{x:.87,y:.07,s:.85},
-  {x:.78,y:.18,s:.60},{x:.92,y:.14,s:.65},{x:.68,y:.14,s:.55},
-  {x:.35,y:.18,s:.45},{x:.15,y:.54,s:.50},{x:.60,y:.80,s:.55},
-];
-const SHROOM_POS = [
-  [.12,.22],[.28,.18],[.06,.62],[.18,.80],[.32,.70],
-  [.42,.58],[.55,.68],[.35,.42],[.20,.48],[.08,.88],
-  [.50,.82],[.65,.72],[.72,.36],[.88,.45],[.92,.25],
-  [.40,.12],[.58,.15],[.15,.08],[.30,.88],[.80,.85],
-];
+// ── Map selection (URL: ?map=1..100) ─────────────────────────
+const mapNum = (() => {
+  const n = parseInt(new URLSearchParams(location.search).get('map') ?? '');
+  return Number.isInteger(n) && n >= 1 && n <= 10 ? n : 1;
+})();
 
+// ── World data (populated by generateWorld) ───────────────────
+let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], SHROOM_POS=[];
 let TREES=[], SHRUBS=[], FLOWERS=[], PATCHES=[], MUSHROOMS=[], COLLIDERS=[];
 
+function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
+
+function generateWorld(seed){
+  const r = mkRng(seed * 6271 + 9973);
+
+  // Mountains: 6-11, in 1-3 clusters mostly in the upper portion
+  MOUNT_DEF = [];
+  const nM = 6 + Math.floor(r()*6);
+  const nCl = 1 + Math.floor(r()*2 + (r()>.55?1:0));
+  const clX = Array.from({length:nCl}, ()=> 0.18+r()*.64);
+  const clY = Array.from({length:nCl}, ()=> 0.04+r()*.30);
+  for(let i=0;i<nM;i++){
+    const c=i%nCl;
+    MOUNT_DEF.push({
+      x: clamp(clX[c]+(r()-.5)*.30, 0.05, 0.95),
+      y: clamp(clY[c]+(r()-.5)*.18, 0.03, 0.48),
+      s: 0.38+r()*.62,
+    });
+  }
+
+  // Water bodies: 4-6, clear of mountains and each other
+  WATER_DEF = [];
+  const nW = 4+Math.floor(r()*3);
+  for(let tries=0; WATER_DEF.length<nW && tries<100; tries++){
+    const wx=0.06+r()*.88, wy=0.12+r()*.80;
+    const clearM = MOUNT_DEF.every(m=>Math.hypot(wx-m.x,wy-m.y)>m.s*.13+0.10);
+    const clearW = WATER_DEF.every(w=>Math.hypot(wx-w.x,wy-w.y)>0.14);
+    if(clearM&&clearW){
+      const rx=0.025+r()*.068, ry=rx*(0.48+r()*.64);
+      WATER_DEF.push({x:wx,y:wy,rx,ry});
+    }
+  }
+
+  // Rivers: 1-3, flowing from near mountains toward water or edges
+  RIVERS = [];
+  const nR = 1+Math.floor(r()*2+(MOUNT_DEF.length>8?1:0));
+  for(let i=0;i<Math.min(nR,3);i++){
+    const m = MOUNT_DEF[Math.floor(r()*MOUNT_DEF.length)];
+    const sx=clamp(m.x+(r()-.5)*.12,0,1), sy=clamp(m.y+m.s*.09+r()*.06,0,1);
+    let ex,ey;
+    if(WATER_DEF.length&&r()>.3){ const w=WATER_DEF[Math.floor(r()*WATER_DEF.length)]; ex=w.x;ey=w.y; }
+    else { ex=0.1+r()*.8; ey=0.55+r()*.4; }
+    const nP=4+Math.floor(r()*4);
+    const pts=[];
+    for(let p=0;p<=nP;p++){
+      const t=p/nP, wiggle=Math.sin(t*Math.PI)*.06;
+      pts.push({x:clamp(sx+(ex-sx)*t+(r()-.5)*wiggle,0,1),
+                y:clamp(sy+(ey-sy)*t+(r()-.5)*wiggle*.7,0,1)});
+    }
+    RIVERS.push(pts);
+  }
+
+  // Mushrooms: 18-26, placed on accessible ground
+  SHROOM_POS = [];
+  const nS=18+Math.floor(r()*9);
+  for(let tries=0; SHROOM_POS.length<nS && tries<400; tries++){
+    const mx=0.03+r()*.94, my=0.03+r()*.94;
+    const inW=WATER_DEF.some(w=>Math.hypot(mx-w.x,my-w.y)<Math.max(w.rx,w.ry)*1.35);
+    const inM=MOUNT_DEF.some(m=>Math.hypot(mx-m.x,my-m.y)<m.s*.09);
+    if(!inW&&!inM) SHROOM_POS.push([mx,my]);
+  }
+}
+
 function buildWorld() {
-  const r = mkRng(42);
+  generateWorld(mapNum);
+
+  const r  = mkRng(mapNum * 1009 + 42);
+  const rp = mkRng(mapNum * 1013 + 77);
+
+  // Trees: distribute types relative to mountain cluster positions
+  const mCX = MOUNT_DEF.reduce((s,m)=>s+m.x,0)/MOUNT_DEF.length;
+  const mCY = MOUNT_DEF.reduce((s,m)=>s+m.y,0)/MOUNT_DEF.length;
 
   TREES = [];
-  for(let i=0;i<65;i++) TREES.push({x:r()*.38,y:.56+r()*.42,t:0,m:0.8+r()*.5});
-  for(let i=0;i<30;i++) TREES.push({x:r()*.28,y:r()*.50,   t:1,m:0.8+r()*.4});
-  for(let i=0;i<18;i++) TREES.push({x:.60+r()*.38,y:r()*.35,t:1,m:0.7+r()*.5});
+  // Dense deciduous forest away from mountains
+  for(let i=0;i<65;i++) TREES.push({x:r()*.42,y:.50+r()*.48,t:0,m:0.8+r()*.5});
+  // Basic pine near mountain side
+  for(let i=0;i<30;i++) TREES.push({x:clamp(mCX-.15+r()*.30,0,1),y:r()*.55,t:1,m:0.8+r()*.4});
+  for(let i=0;i<18;i++) TREES.push({x:clamp(mCX+r()*.40,0,1),y:clamp(mCY+r()*.35,0,.55),t:1,m:0.7+r()*.5});
   for(let i=0;i<50;i++) TREES.push({x:r(),y:r(),t:r()>.45?1:0,m:0.7+r()*.6});
-  // Tall spruce: clusters near forest edges and mountains
-  for(let i=0;i<24;i++) TREES.push({x:r()*.42,    y:r()*.55,    t:2,m:0.7+r()*1.1});
-  for(let i=0;i<18;i++) TREES.push({x:.55+r()*.43,y:r()*.45,    t:2,m:0.8+r()*1.0});
-  for(let i=0;i<14;i++) TREES.push({x:r(),         y:r(),        t:2,m:0.5+r()*1.2});
-  // Wide drooping fir: scattered, varied sizes
-  for(let i=0;i<22;i++) TREES.push({x:r(),         y:r(),        t:3,m:0.7+r()*.8});
-  for(let i=0;i<12;i++) TREES.push({x:r()*.35,     y:.55+r()*.4, t:3,m:0.9+r()*.9});
-  // Scots pine: open hillsides, tall trunks
-  for(let i=0;i<15;i++) TREES.push({x:r(),         y:r(),        t:4,m:0.9+r()*.9});
+  // Tall spruce
+  for(let i=0;i<24;i++) TREES.push({x:r()*.44,y:r()*.58,t:2,m:0.7+r()*1.1});
+  for(let i=0;i<18;i++) TREES.push({x:clamp(mCX-.1+r()*.45,0,1),y:r()*.48,t:2,m:0.8+r()*1.0});
+  for(let i=0;i<14;i++) TREES.push({x:r(),y:r(),t:2,m:0.5+r()*1.2});
+  // Wide fir
+  for(let i=0;i<22;i++) TREES.push({x:r(),y:r(),t:3,m:0.7+r()*.8});
+  for(let i=0;i<12;i++) TREES.push({x:r()*.38,y:.52+r()*.42,t:3,m:0.9+r()*.9});
+  // Scots pine
+  for(let i=0;i<15;i++) TREES.push({x:r(),y:r(),t:4,m:0.9+r()*.9});
 
   SHRUBS = [];
   for(let i=0;i<110;i++) SHRUBS.push({x:r(),y:r(),m:0.5+r()*.7,berries:r()>.65});
@@ -171,7 +235,6 @@ function buildWorld() {
   for(let i=0;i<300;i++) FLOWERS.push({x:r(),y:r(),c:r()>.6?P.fl1:r()>.3?P.fl2:P.fl3,s:0.4+r()*.6});
 
   PATCHES = [];
-  const rp=mkRng(77);
   for(let i=0;i<180;i++) PATCHES.push({x:rp(),y:rp(),w:0.004+rp()*0.01,h:0.002+rp()*0.007,d:rp()>.45});
 
   MUSHROOMS = SHROOM_POS.map(([fx,fy]) => ({fx,fy,collected:false}));
@@ -192,6 +255,16 @@ let collected=0, gameWon=false, gameTime=0;
 const SPEED  = 260;
 const CHAR_R = 14;
 const PICK_R = 38;
+
+function findStart() {
+  const r = mkRng(mapNum * 7331 + 17);
+  for(let i=0; i<500; i++){
+    const x = CHAR_R*2 + r()*(WW-CHAR_R*4);
+    const y = CHAR_R*2 + r()*(WH-CHAR_R*4);
+    if(!blocked(x,y)) return {x,y};
+  }
+  return {x:WW*.5, y:WH*.5};
+}
 
 function snapCam() {
   cam.x = Math.max(0,Math.min(WW-VW, char.x-VW/2));
@@ -800,12 +873,13 @@ function startGame(){
   MUSHROOMS.forEach(m=>m.collected=false);
   document.getElementById('cnt').textContent='0';
   document.getElementById('win').classList.remove('show');
-  char.x=WW*.30; char.y=WH*.35; char.vx=0; char.vy=0; char.facing=1;
+  const start=findStart(); char.x=start.x; char.y=start.y; char.vx=0; char.vy=0; char.facing=1;
   snapCam();
 }
 
 document.getElementById('btn-play').addEventListener('click',startGame);
 window.addEventListener('resize',resize);
+document.getElementById('mapnum').textContent = mapNum;
 
 resize();
 startGame();
