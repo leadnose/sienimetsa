@@ -256,6 +256,16 @@ const SPEED  = 260;
 const CHAR_R = 14;
 const PICK_R = 38;
 
+function findStart() {
+  const r = mkRng(mapNum * 7331 + 17);
+  for(let i=0; i<500; i++){
+    const x = CHAR_R*2 + r()*(WW-CHAR_R*4);
+    const y = CHAR_R*2 + r()*(WH-CHAR_R*4);
+    if(!blocked(x,y)) return {x,y};
+  }
+  return {x:WW*.5, y:WH*.5};
+}
+
 function snapCam() {
   cam.x = Math.max(0,Math.min(WW-VW, char.x-VW/2));
   cam.y = Math.max(0,Math.min(WH-VH, char.y-VH/2));
@@ -863,7 +873,7 @@ function startGame(){
   MUSHROOMS.forEach(m=>m.collected=false);
   document.getElementById('cnt').textContent='0';
   document.getElementById('win').classList.remove('show');
-  char.x=WW*.30; char.y=WH*.35; char.vx=0; char.vy=0; char.facing=1;
+  const start=findStart(); char.x=start.x; char.y=start.y; char.vx=0; char.vy=0; char.facing=1;
   snapCam();
 }
 
