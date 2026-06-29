@@ -6,7 +6,7 @@
 <title>Sienimetsa 🍄</title>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;}
-html,body{width:100%;height:100%;overflow:hidden;background:#2a5018;}
+html,body{width:100%;height:100%;overflow:hidden;background:#1e2e0e;}
 canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 
 #hud{
@@ -105,27 +105,42 @@ function mkRng(seed) {
 
 // ── Pixel art palette ─────────────────────────────────────────
 const P = {
-  grass:  '#5aa030', grassD: '#3a7820', grassL: '#78c050',
-  trunk:  '#7a5228', trunkD: '#4a3010',
-  leaf:   '#2a6018', leafM:  '#3a8028', leafL:  '#5aac3c',
-  pine:   '#1e5018', pineM:  '#2a6820', pineL:  '#3a8830',
-  spr:    '#182818', sprM:   '#203820', sprL:   '#304e28', // spruce (cool dark)
-  fir:    '#1a4c18', firM:   '#286028', firL:   '#3a7838', // fir (warmer)
-  scots:  '#8a5830', scotsD: '#5a3810',                    // scots pine trunk
-  shrub:  '#2e5818', shrubL: '#428228',
-  water:  '#3898c0', waterL: '#60b8d8', waterD: '#206888',
-  shore:  '#c09830', shoreD: '#907010',
-  riverW: '#48a8d0', riverB: '#a88020',
-  hill:   '#6878a0', hillL:  '#90a8bc', hillD:  '#485868', snow: '#dceef8',
-  mushrC: '#cc2020', mushrCd:'#880808', mushrS: '#e0d8b0',
-  skin:   '#f0b070', skinD:  '#c88040',
-  hat:    '#384e1a', hatD:   '#263410',
-  coat:   '#4e6818', coatD:  '#344810',
-  cape:   '#c88010', capeD:  '#986008',
-  belt:   '#4a2808', shoe:   '#281408',
-  fl1:    '#f880a8', fl2:    '#f8d840', fl3:    '#d880f0',
-  lpad:   '#286018', outline:'#182010',
-  mm_g:   '#4a8828', mm_w:   '#3898c0', mm_h:   '#8898b0',
+  // Ground — dark earthy olive, like AoE2 fertile terrain
+  grass:  '#3a5a18', grassD: '#263c0e', grassL: '#4e7422',
+  // Trunks — rich bark brown
+  trunk:  '#6e4018', trunkD: '#3e2208',
+  // Deciduous — very dark medieval forest green
+  leaf:   '#1c3c0c', leafM:  '#284e14', leafL:  '#34601c',
+  // Basic pine — near black-green
+  pine:   '#142608', pineM:  '#1c3610', pineL:  '#264618',
+  // Spruce — cold dark blue-green
+  spr:    '#0e1e0a', sprM:   '#162a10', sprL:   '#203818',
+  // Fir — slightly warmer dark green
+  fir:    '#142208', firM:   '#1e3210', firL:   '#284218',
+  // Scots pine trunk — aged orange-brown
+  scots:  '#7a4a1e', scotsD: '#4a2a0c',
+  // Shrubs — deep forest understory
+  shrub:  '#1a3008', shrubL: '#284018',
+  // Water — deep AoE2 navy-teal
+  water:  '#1a5080', waterL: '#2870a8', waterD: '#0e3050',
+  // Shore — muddy sand
+  shore:  '#907228', shoreD: '#6a5018',
+  // Rivers
+  riverW: '#2870a8', riverB: '#7a6018',
+  // Mountains — stone grey-brown, no fantasy blue
+  hill:   '#6a5a48', hillL:  '#8a7a68', hillD:  '#4a3a2c', snow: '#bab0a0',
+  // Mushroom — darker earthy red, cream stem
+  mushrC: '#a01818', mushrCd:'#681010', mushrS: '#d8c898',
+  // Character — warm weathered tones
+  skin:   '#e0a060', skinD:  '#b07030',
+  hat:    '#283a10', hatD:   '#182408',
+  coat:   '#384c10', coatD:  '#243008',
+  cape:   '#a06808', capeD:  '#704808',
+  belt:   '#381808', shoe:   '#1c0c04',
+  // Wildflowers — muted medieval: daisy white, buttercup, herb green
+  fl1:    '#e8e0a0', fl2:    '#d8c840', fl3:    '#b8d068',
+  lpad:   '#183808', outline:'#100c04',
+  mm_g:   '#3a5818', mm_w:   '#1a5080', mm_h:   '#6a5a48',
 };
 
 // ── Map selection (URL: ?map=1..100) ─────────────────────────
@@ -429,15 +444,15 @@ function drawWater(w,wi){
   pr(cx-rx,  cy-ry-1, rx*2,   ry*2+2, P.shore);
 
   // Water fill
-  pr(cx-rx,cy-ry,rx*2,ry*2,P.water);
+  pr(cx-rx,cy-ry,rx*2,ry*2,P.waterD);
 
-  // Horizontal shimmer lines (animated)
-  const tick=Math.floor(gameTime*3)%3;
-  pixCtx.fillStyle=P.waterL;
-  for(let row=cy-ry+(3-tick)%3;row<cy+ry;row+=3)
-    pixCtx.fillRect(cx-rx+2,row,rx*2-4,1);
+  // Cross-hatch ripple (AoE2-style still water)
+  const tick=Math.floor(gameTime*2)%4;
+  pixCtx.fillStyle=P.water;
+  for(let row=cy-ry+1;row<cy+ry-1;row+=2)
+    pixCtx.fillRect(cx-rx+1+(row+tick)%2, row, rx*2-2, 1);
 
-  // Glint pixel top-left
+  // Bright glint top-left corner
   pr(cx-rx/2|0, cy-ry/2|0, 2, 1, P.waterL);
 
   // Corner cut (makes it less square)
@@ -481,22 +496,32 @@ function drawHill(m){
   const w=(m.s*Math.min(WW,WH)*.20/PS)|0, h=(m.s*Math.min(WW,WH)*.16/PS)|0;
   if(cx+w<0||cx-w>pixW||cy<0||cy-h>pixH) return;
 
-  // Draw rows bottom→top, each narrower (stepped silhouette)
+  // Draw rows bottom→top (stepped stone silhouette)
   for(let row=0;row<=h;row++){
     const t=row/h;
-    const rw=Math.round(w*(1-t*t*0.9));  // parabolic shoulder
-    const c=t>.85?P.snow : t>.55?P.hillL : t>.25?P.hill : P.hillD;
+    const rw=Math.round(w*(1-t*t*0.9));
+    const c=t>.88?P.snow : t>.58?P.hillL : t>.28?P.hill : P.hillD;
     pr(cx-rw, cy-row, rw*2, 1, c);
   }
 
-  // Dark shadow row at base
+  // Rock face crevices — diagonal dark streaks for stony texture
+  const cr=mkRng(m.x*511+m.y*211|0);
+  for(let i=0;i<5+Math.floor(m.s*4);i++){
+    const crx=(cx+(cr()-.5)*w*1.4)|0;
+    const cry=(cy-cr()*h*.72)|0;
+    const crl=2+Math.floor(cr()*4);
+    for(let j=0;j<crl;j++) pr(crx+j, cry-j, 1, 1, P.hillD);
+  }
+
+  // Dark shadow at base
   pr(cx-w, cy, w*2, 2, P.hillD);
 
-  // Scattered pixel flowers at foot
+  // Sparse scrub at foot (no flowers — it's rocky)
   const fr=mkRng(m.x*777+m.y*333|0);
-  for(let i=0;i<6;i++){
-    const fx=(cx+(fr()-.5)*w*1.6)|0, fy=(cy-fr()*h*.25)|0;
-    pr(fx,fy,1,1,fr()>.5?P.fl1:P.fl3);
+  for(let i=0;i<4;i++){
+    const fx=(cx+(fr()-.5)*w*1.5)|0, fy=(cy-fr()*h*.18)|0;
+    pr(fx,fy,1,1,P.shrub);
+    pr(fx+1,fy-1,1,1,P.shrubL);
   }
 }
 
