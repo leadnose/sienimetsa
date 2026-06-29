@@ -6,7 +6,7 @@
 <title>Sienimetsa 🍄</title>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;}
-html,body{width:100%;height:100%;overflow:hidden;background:#2a5018;}
+html,body{width:100%;height:100%;overflow:hidden;background:#1e2e0e;}
 canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 
 #hud{
@@ -17,7 +17,6 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   color:#5d3200;display:flex;align-items:center;gap:6px;
   box-shadow:0 3px 14px rgba(0,0,0,.18);
 }
-
 #mm-wrap{
   position:fixed;bottom:14px;right:14px;z-index:50;
   border:3px solid rgba(255,255,255,.7);border-radius:10px;
@@ -25,20 +24,16 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   image-rendering:pixelated;
 }
 #minimap{display:block;}
-
 #joy-zone{position:fixed;inset:0;z-index:20;pointer-events:none;}
 #joy-base{
-  position:absolute;display:none;
-  width:100px;height:100px;border-radius:50%;
+  position:absolute;display:none;width:100px;height:100px;border-radius:50%;
   background:rgba(255,255,255,.18);border:3px solid rgba(255,255,255,.45);
   transform:translate(-50%,-50%);
 }
 #joy-knob{
-  position:absolute;top:50%;left:50%;
-  width:44px;height:44px;border-radius:50%;
+  position:absolute;top:50%;left:50%;width:44px;height:44px;border-radius:50%;
   background:rgba(255,255,255,.65);transform:translate(-50%,-50%);
 }
-
 #win{
   position:fixed;inset:0;z-index:300;
   display:none;flex-direction:column;align-items:center;justify-content:center;
@@ -58,7 +53,6 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   transition:transform .1s,box-shadow .1s;touch-action:manipulation;
 }
 #btn-play:active{transform:translateY(4px);box-shadow:0 2px 0 #9d2700;}
-
 #mapdisp{
   position:fixed;top:14px;right:14px;z-index:50;
   background:rgba(255,250,230,.95);border:3px solid #b8860b;
@@ -83,16 +77,15 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 <script>
 'use strict';
 
-// ── Screen canvas ─────────────────────────────────────────────
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 const mmCv   = document.getElementById('minimap');
 const mmCtx  = mmCv.getContext('2d');
 
-// ── Pixel canvas (low-res, blitted 1:PS to screen) ────────────
 const pixCv  = document.createElement('canvas');
 const pixCtx = pixCv.getContext('2d');
-let PS=4, pixW, pixH;   // PS = screen pixels per "pixel art pixel"
+let PS=2, pixW, pixH;
+const SP = {}; // sprite cache
 
 let VW, VH, WW, WH;
 const MM_W = 160;
@@ -103,38 +96,38 @@ function mkRng(seed) {
   return () => { s = Math.imul(s,1664525)+1013904223>>>0; return s/2**32; };
 }
 
-// ── Pixel art palette ─────────────────────────────────────────
+// ── Palette ───────────────────────────────────────────────────
 const P = {
-  grass:  '#5aa030', grassD: '#3a7820', grassL: '#78c050',
-  trunk:  '#7a5228', trunkD: '#4a3010',
-  leaf:   '#2a6018', leafM:  '#3a8028', leafL:  '#5aac3c',
-  pine:   '#1e5018', pineM:  '#2a6820', pineL:  '#3a8830',
-  spr:    '#182818', sprM:   '#203820', sprL:   '#304e28', // spruce (cool dark)
-  fir:    '#1a4c18', firM:   '#286028', firL:   '#3a7838', // fir (warmer)
-  scots:  '#8a5830', scotsD: '#5a3810',                    // scots pine trunk
-  shrub:  '#2e5818', shrubL: '#428228',
-  water:  '#3898c0', waterL: '#60b8d8', waterD: '#206888',
-  shore:  '#c09830', shoreD: '#907010',
-  riverW: '#48a8d0', riverB: '#a88020',
-  hill:   '#6878a0', hillL:  '#90a8bc', hillD:  '#485868', snow: '#dceef8',
-  mushrC: '#cc2020', mushrCd:'#880808', mushrS: '#e0d8b0',
-  skin:   '#f0b070', skinD:  '#c88040',
-  hat:    '#384e1a', hatD:   '#263410',
-  coat:   '#4e6818', coatD:  '#344810',
-  cape:   '#c88010', capeD:  '#986008',
-  belt:   '#4a2808', shoe:   '#281408',
-  fl1:    '#f880a8', fl2:    '#f8d840', fl3:    '#d880f0',
-  lpad:   '#286018', outline:'#182010',
-  mm_g:   '#4a8828', mm_w:   '#3898c0', mm_h:   '#8898b0',
+  grass:  '#3a5a18', grassD: '#263c0e', grassL: '#4e7422',
+  trunk:  '#6e4018', trunkD: '#3e2208',
+  leaf:   '#1c3c0c', leafM:  '#284e14', leafL:  '#34601c',
+  pine:   '#142608', pineM:  '#1c3610', pineL:  '#264618',
+  spr:    '#0e1e0a', sprM:   '#162a10', sprL:   '#203818',
+  fir:    '#142208', firM:   '#1e3210', firL:   '#284218',
+  scots:  '#7a4a1e', scotsD: '#4a2a0c',
+  shrub:  '#1a3008', shrubL: '#284018',
+  water:  '#1a5080', waterL: '#2870a8', waterD: '#0e3050',
+  shore:  '#907228', shoreD: '#6a5018',
+  riverW: '#2870a8', riverB: '#7a6018',
+  hill:   '#6a5a48', hillL:  '#8a7a68', hillD:  '#4a3a2c', snow: '#bab0a0',
+  mushrC: '#a01818', mushrCd:'#681010', mushrS: '#d8c898',
+  skin:   '#e0a060', skinD:  '#b07030',
+  hat:    '#283a10', hatD:   '#182408',
+  coat:   '#384c10', coatD:  '#243008',
+  cape:   '#a06808', capeD:  '#704808',
+  belt:   '#381808', shoe:   '#1c0c04',
+  fl1:    '#e8e0a0', fl2:    '#d8c840', fl3:    '#b8d068',
+  lpad:   '#183808', outline:'#100c04',
+  mm_g:   '#3a5818', mm_w:   '#1a5080', mm_h:   '#6a5a48',
 };
 
-// ── Map selection (URL: ?map=1..100) ─────────────────────────
+// ── Map selection ─────────────────────────────────────────────
 const mapNum = (() => {
   const n = parseInt(new URLSearchParams(location.search).get('map') ?? '');
   return Number.isInteger(n) && n >= 1 && n <= 10 ? n : 1;
 })();
 
-// ── World data (populated by generateWorld) ───────────────────
+// ── World data ────────────────────────────────────────────────
 let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], SHROOM_POS=[];
 let TREES=[], SHRUBS=[], FLOWERS=[], PATCHES=[], MUSHROOMS=[], COLLIDERS=[];
 
@@ -142,8 +135,6 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
 
 function generateWorld(seed){
   const r = mkRng(seed * 6271 + 9973);
-
-  // Mountains: 6-11, in 1-3 clusters mostly in the upper portion
   MOUNT_DEF = [];
   const nM = 6 + Math.floor(r()*6);
   const nCl = 1 + Math.floor(r()*2 + (r()>.55?1:0));
@@ -157,8 +148,6 @@ function generateWorld(seed){
       s: 0.38+r()*.62,
     });
   }
-
-  // Water bodies: 4-6, clear of mountains and each other
   WATER_DEF = [];
   const nW = 4+Math.floor(r()*3);
   for(let tries=0; WATER_DEF.length<nW && tries<100; tries++){
@@ -170,8 +159,6 @@ function generateWorld(seed){
       WATER_DEF.push({x:wx,y:wy,rx,ry});
     }
   }
-
-  // Rivers: 1-3, flowing from near mountains toward water or edges
   RIVERS = [];
   const nR = 1+Math.floor(r()*2+(MOUNT_DEF.length>8?1:0));
   for(let i=0;i<Math.min(nR,3);i++){
@@ -180,8 +167,7 @@ function generateWorld(seed){
     let ex,ey;
     if(WATER_DEF.length&&r()>.3){ const w=WATER_DEF[Math.floor(r()*WATER_DEF.length)]; ex=w.x;ey=w.y; }
     else { ex=0.1+r()*.8; ey=0.55+r()*.4; }
-    const nP=4+Math.floor(r()*4);
-    const pts=[];
+    const nP=4+Math.floor(r()*4), pts=[];
     for(let p=0;p<=nP;p++){
       const t=p/nP, wiggle=Math.sin(t*Math.PI)*.06;
       pts.push({x:clamp(sx+(ex-sx)*t+(r()-.5)*wiggle,0,1),
@@ -189,8 +175,6 @@ function generateWorld(seed){
     }
     RIVERS.push(pts);
   }
-
-  // Mushrooms: 18-26, placed on accessible ground
   SHROOM_POS = [];
   const nS=18+Math.floor(r()*9);
   for(let tries=0; SHROOM_POS.length<nS && tries<400; tries++){
@@ -203,47 +187,32 @@ function generateWorld(seed){
 
 function buildWorld() {
   generateWorld(mapNum);
-
   const r  = mkRng(mapNum * 1009 + 42);
   const rp = mkRng(mapNum * 1013 + 77);
-
-  // Trees: distribute types relative to mountain cluster positions
   const mCX = MOUNT_DEF.reduce((s,m)=>s+m.x,0)/MOUNT_DEF.length;
   const mCY = MOUNT_DEF.reduce((s,m)=>s+m.y,0)/MOUNT_DEF.length;
-
   TREES = [];
-  // Dense deciduous forest away from mountains
   for(let i=0;i<65;i++) TREES.push({x:r()*.42,y:.50+r()*.48,t:0,m:0.8+r()*.5});
-  // Basic pine near mountain side
   for(let i=0;i<30;i++) TREES.push({x:clamp(mCX-.15+r()*.30,0,1),y:r()*.55,t:1,m:0.8+r()*.4});
   for(let i=0;i<18;i++) TREES.push({x:clamp(mCX+r()*.40,0,1),y:clamp(mCY+r()*.35,0,.55),t:1,m:0.7+r()*.5});
   for(let i=0;i<50;i++) TREES.push({x:r(),y:r(),t:r()>.45?1:0,m:0.7+r()*.6});
-  // Tall spruce
   for(let i=0;i<24;i++) TREES.push({x:r()*.44,y:r()*.58,t:2,m:0.7+r()*1.1});
   for(let i=0;i<18;i++) TREES.push({x:clamp(mCX-.1+r()*.45,0,1),y:r()*.48,t:2,m:0.8+r()*1.0});
   for(let i=0;i<14;i++) TREES.push({x:r(),y:r(),t:2,m:0.5+r()*1.2});
-  // Wide fir
   for(let i=0;i<22;i++) TREES.push({x:r(),y:r(),t:3,m:0.7+r()*.8});
   for(let i=0;i<12;i++) TREES.push({x:r()*.38,y:.52+r()*.42,t:3,m:0.9+r()*.9});
-  // Scots pine
   for(let i=0;i<15;i++) TREES.push({x:r(),y:r(),t:4,m:0.9+r()*.9});
-
   SHRUBS = [];
   for(let i=0;i<110;i++) SHRUBS.push({x:r(),y:r(),m:0.5+r()*.7,berries:r()>.65});
-
   FLOWERS = [];
   for(let i=0;i<300;i++) FLOWERS.push({x:r(),y:r(),c:r()>.6?P.fl1:r()>.3?P.fl2:P.fl3,s:0.4+r()*.6});
-
   PATCHES = [];
   for(let i=0;i<180;i++) PATCHES.push({x:rp(),y:rp(),w:0.004+rp()*0.01,h:0.002+rp()*0.007,d:rp()>.45});
-
   MUSHROOMS = SHROOM_POS.map(([fx,fy]) => ({fx,fy,collected:false}));
-
   COLLIDERS = [
     ...WATER_DEF.map(w => ({fx:w.x, fy:w.y, fr:Math.max(w.rx,w.ry)*1.05})),
     ...MOUNT_DEF.map(m => ({fx:m.x, fy:m.y, fr:m.s*.075})),
   ];
-
   document.getElementById('tot').textContent = MUSHROOMS.length;
 }
 
@@ -251,10 +220,7 @@ function buildWorld() {
 const char = {x:0,y:0,vx:0,vy:0,facing:1};
 const cam  = {x:0,y:0};
 let collected=0, gameWon=false, gameTime=0;
-
-const SPEED  = 260;
-const CHAR_R = 14;
-const PICK_R = 38;
+const SPEED=260, CHAR_R=14, PICK_R=38;
 
 function findStart() {
   const r = mkRng(mapNum * 7331 + 17);
@@ -265,7 +231,6 @@ function findStart() {
   }
   return {x:WW*.5, y:WH*.5};
 }
-
 function snapCam() {
   cam.x = Math.max(0,Math.min(WW-VW, char.x-VW/2));
   cam.y = Math.max(0,Math.min(WH-VH, char.y-VH/2));
@@ -281,7 +246,6 @@ function easeCamera(dt) {
 const keys={};
 window.addEventListener('keydown',e=>{ keys[e.key]=true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); });
 window.addEventListener('keyup',  e=>{ keys[e.key]=false; });
-
 const joy={active:false,bx:0,by:0,dx:0,dy:0};
 const joyBase=document.getElementById('joy-base');
 const joyKnob=document.getElementById('joy-knob');
@@ -289,7 +253,6 @@ const JR=50;
 canvas.addEventListener('touchstart',e=>{ e.preventDefault(); const t=e.changedTouches[0]; joy.active=true;joy.bx=t.clientX;joy.by=t.clientY;joy.dx=0;joy.dy=0; joyBase.style.left=t.clientX+'px';joyBase.style.top=t.clientY+'px';joyBase.style.display='block'; },{passive:false});
 canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.changedTouches[0]; const dx=t.clientX-joy.bx,dy=t.clientY-joy.by; const a=Math.atan2(dy,dx),cl=Math.min(Math.hypot(dx,dy),JR)/JR; joy.dx=Math.cos(a)*cl;joy.dy=Math.sin(a)*cl; joyKnob.style.left=(50+joy.dx*JR)+'px';joyKnob.style.top=(50+joy.dy*JR)+'px'; },{passive:false});
 canvas.addEventListener('touchend', e=>{ e.preventDefault(); joy.active=false;joy.dx=0;joy.dy=0;joyBase.style.display='none'; },{passive:false});
-
 function inputDir() {
   let dx=0,dy=0;
   if(keys['ArrowLeft']||keys['a']||keys['A'])  dx-=1;
@@ -325,7 +288,6 @@ const CFTCOL=['#ff595e','#ffca3a','#8ac926','#1982c4','#6a4c93','#ff924c','#fff'
 const dynSty=document.createElement('style');
 dynSty.textContent=`@keyframes spk{from{transform:translate(0,0)scale(.3);opacity:1}to{transform:translate(var(--dx),var(--dy))scale(1.1);opacity:0}}@keyframes cft{from{transform:translateY(0)rotate(0deg);opacity:1}to{transform:translateY(108vh)rotate(720deg);opacity:.2}}`;
 document.head.appendChild(dynSty);
-
 function spawnSparkle(sx,sy){
   for(let i=0;i<6;i++){
     const el=document.createElement('div');
@@ -350,16 +312,13 @@ function confetti(){
   },i*45);
 }
 
-// ── Pixel drawing helpers ─────────────────────────────────────
+// ── Pixel helpers ─────────────────────────────────────────────
 function wpx(wx){ return (wx-cam.x)/PS|0; }
 function wpy(wy){ return (wy-cam.y)/PS|0; }
-
 function pr(x,y,w,h,c){
   if(w<=0||h<=0||x>=pixW||y>=pixH||x+w<=0||y+h<=0) return;
   pixCtx.fillStyle=c; pixCtx.fillRect(x,y,w,h);
 }
-
-// Pixel-circle: fills integer rows row by row
 function pixCircle(cx,cy,r,c){
   pixCtx.fillStyle=c;
   for(let dy=-r;dy<=r;dy++){
@@ -367,8 +326,6 @@ function pixCircle(cx,cy,r,c){
     if(rw>0) pixCtx.fillRect(cx-rw,cy+dy,rw*2,1);
   }
 }
-
-// Thick pixel line (Bresenham with square caps)
 function pixLine(x0,y0,x1,y1,t,c){
   const steps=Math.ceil(Math.hypot(x1-x0,y1-y0))||1;
   const h=t>>1;
@@ -379,247 +336,641 @@ function pixLine(x0,y0,x1,y1,t,c){
   }
 }
 
-// ── Ground ────────────────────────────────────────────────────
-function drawGround(){
-  pr(0,0,pixW,pixH,P.grass);
+// ── Sprite rendering: ImageData + Bayer 4×4 dithering ────────
+// All sprite builders write into a Uint8ClampedArray pixel buffer
+// then call ctx.putImageData — giving per-pixel control and real
+// ordered dithering at every color transition (the AoE2 look).
+const BAYER4=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+function b4(x,y){return BAYER4[(y&3)*4+(x&3)];}
+function hex2rgb(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];}
+function mkPalRGB(a){return a.map(hex2rgb);}
 
-  // Deterministic variation patches (world-fixed)
-  PATCHES.forEach(p=>{
-    const sx=wpx(p.x*WW), sy=wpy(p.y*WH);
-    const sw=Math.max(1,p.w*WW/PS|0), sh=Math.max(1,p.h*WH/PS|0);
-    pr(sx,sy,sw,sh,p.d?P.grassD:P.grassL);
+// Write one opaque pixel (bounds-checked)
+function ibSet(buf,W,H,x,y,r,g,b){
+  if(x<0||y<0||x>=W||y>=H)return;
+  const p=4*(y*W+x);buf[p]=r;buf[p+1]=g;buf[p+2]=b;buf[p+3]=255;
+}
+// Fill a rectangle with one RGB colour
+function ibRect(buf,W,H,x,y,w,h,rgb){
+  for(let row=Math.max(0,y),re=y+h;row<Math.min(H,re);row++)
+    for(let col=Math.max(0,x),ce=x+w;col<Math.min(W,ce);col++)
+      ibSet(buf,W,H,col,row,...rgb);
+}
+// Semi-transparent shadow ellipse (written on empty/transparent pixels only)
+function ibShadEllipse(buf,W,H,cx,cy,rx,ry){
+  for(let dy=-ry;dy<=ry;dy++){
+    const rw=Math.round(rx*Math.sqrt(Math.max(0,1-(dy/ry)**2)));
+    for(let dx=-rw;dx<=rw;dx++){
+      const px=cx+dx,py=cy+dy;
+      if(px<0||py<0||px>=W||py>=H)continue;
+      const p=4*(py*W+px); if(buf[p+3])continue;
+      buf[p]=0;buf[p+1]=0;buf[p+2]=0;buf[p+3]=110;
+    }
+  }
+}
+// Per-pixel Bayer-dithered sphere. palRGB[0]=darkest, palRGB[n-1]=brightest.
+// Light source: upper-left (-135°). Outer edge softened with dithered alpha.
+function ibSphere(buf,W,H,cx,cy,sr,palRGB){
+  if(sr<1||palRGB.length<2)return;
+  const n=palRGB.length;
+  for(let dy=-sr;dy<=sr;dy++){
+    if(cy+dy<0||cy+dy>=H)continue;
+    for(let dx=-sr;dx<=sr;dx++){
+      if(cx+dx<0||cx+dx>=W)continue;
+      const d=Math.sqrt(dx*dx+dy*dy);
+      if(d>sr+0.5)continue;
+      const bt=b4(cx+dx,cy+dy);
+      if(d>sr-0.5&&bt<9)continue;  // soft Bayer-dithered edge
+      // Diffuse lighting: upper-left (-0.707,-0.707) + ambient 0.25
+      const l=Math.max(0,(-dx-dy)/(sr*1.414));
+      const shade=0.25+0.75*l;
+      const fi=shade*(n-1);
+      const i0=Math.min(n-2,fi|0);
+      const pick=(fi-i0)*16>bt?i0+1:i0;
+      ibSet(buf,W,H,cx+dx,cy+dy,...palRGB[pick]);
+    }
+  }
+}
+// Draw one Bayer-shaded horizontal row of a conifer tier.
+// Left side bright (lit), right side dark (shadow), Bayer dithered throughout.
+// Edge pixels beyond hw are dithered to create organic needle-tip silhouette.
+function ibCRow(buf,W,H,cx,y,hw,palRGB){
+  if(hw<1||palRGB.length<2)return;
+  const n=palRGB.length,hiw=hw|0;
+  for(let dx=-hiw;dx<=hiw;dx++){
+    const t=Math.abs(dx)/Math.max(1,hw);
+    const lit=dx<=0?0.45+t*0.40:0.45-t*0.36;  // left=bright, right=dark
+    const fi=Math.max(0,Math.min(n-1-1e-4,lit*(n-1)));
+    const i0=fi|0;
+    const pick=(fi-i0)*16>b4(cx+dx,y)?i0+1:i0;
+    ibSet(buf,W,H,cx+dx,y,...palRGB[pick]);
+  }
+  // Bayer fringe 1px beyond edge (lit left, shadow right)
+  if(b4(cx-hiw-1,y)>9) ibSet(buf,W,H,cx-hiw-1,y,...palRGB[Math.min(n-1,(n*.68)|0)]);
+  if(b4(cx+hiw+1,y)>11) ibSet(buf,W,H,cx+hiw+1,y,...palRGB[Math.max(0,(n*.18)|0)]);
+}
+
+// ── Deciduous oak sprite ──────────────────────────────────────
+// 4-layer lobe soup using ibSphere (per-pixel Bayer-dithered spheres).
+// No base fill — silhouette defined entirely by outer-ring lobes at
+// 60–108% of r. Each lobe is independently sphere-shaded → organic 3D.
+function makeDecidSpr(r){
+  const W=(r*3+8)|0, H=(r*4+10)|0;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const cx=(W>>1), cy=H-3, cY=cy-(r*.68)|0;
+
+  const palRGB=mkPalRGB([
+    '#040c03','#080f05','#0d1a08','#152308',
+    '#1e3212','#273f18','#315120','#3d6328',
+    '#4a7730','#579038','#66a040','#76b04a',
+  ]);
+
+  const id=c.createImageData(W,H);
+  const buf=id.data;
+
+  ibShadEllipse(buf,W,H,cx+(r*.18)|0,cy+2,(r*.82)|0,(r*.26)|0);
+
+  const rng=mkRng(r*8191+1009);
+
+  // Layer 1 — back/interior (darkest palette range)
+  for(let i=0;i<8;i++){
+    const a=rng()*Math.PI*2,d=rng()*r*.52;
+    ibSphere(buf,W,H,(cx+Math.cos(a)*d)|0,(cY+Math.sin(a)*d*.85)|0,
+      Math.max(4,(r*(0.28+rng()*.24))|0), palRGB.slice(0,5));
+  }
+  // Layer 2 — mid volume
+  for(let i=0;i<14;i++){
+    const a=rng()*Math.PI*2,d=rng()*r*.82;
+    const lx=(cx+Math.cos(a)*d)|0,ly=(cY+Math.sin(a)*d*.88)|0;
+    const isLit=(cx-lx)/r+(cY-ly)/r>.28;
+    ibSphere(buf,W,H,lx,ly,
+      Math.max(4,(r*(0.22+rng()*.26))|0), palRGB.slice(isLit?3:2,isLit?9:8));
+  }
+  // Layer 3 — outer ring: 60–108% radius variance → lumpy organic silhouette
+  for(let i=0;i<22;i++){
+    const a=(i/22)*Math.PI*2+(rng()-.5)*.6;
+    const d=r*(0.60+rng()*.48);
+    const lx=(cx+Math.cos(a)*d)|0,ly=(cY+Math.sin(a)*d*.88)|0;
+    const isLit=(cx-lx)/r+(cY-ly)/r>.20;
+    ibSphere(buf,W,H,lx,ly,
+      Math.max(4,(r*(0.19+rng()*.18))|0), palRGB.slice(isLit?5:3,isLit?11:9));
+    if(rng()>.45){
+      const a2=a+(rng()-.5)*.5,d2=d*(0.78+rng()*.32);
+      ibSphere(buf,W,H,(cx+Math.cos(a2)*d2)|0,(cY+Math.sin(a2)*d2*.88)|0,
+        Math.max(3,(r*(0.13+rng()*.12))|0), palRGB.slice(isLit?4:2,isLit?9:7));
+    }
+  }
+  // Layer 4 — upper-left highlights
+  for(let i=0;i<7;i++){
+    const a=-Math.PI*.75+(rng()-.5)*Math.PI;
+    ibSphere(buf,W,H,
+      (cx+Math.cos(a)*r*(0.10+rng()*.55))|0,
+      (cY+Math.sin(a)*r*(0.10+rng()*.55)*.85)|0,
+      Math.max(3,(r*(0.14+rng()*.14))|0), palRGB.slice(7));
+  }
+
+  // Trunk (drawn last so it appears on top)
+  const tw=Math.max(2,(r*.16)|0),th=Math.max(4,(r*.65)|0);
+  ibRect(buf,W,H,cx-tw-3,cy-4,4,6,[58,30,8]);
+  ibRect(buf,W,H,cx+tw-1,cy-4,4,6,[58,30,8]);
+  ibRect(buf,W,H,cx-tw,cy-th,tw,th,[126,80,34]);
+  ibRect(buf,W,H,cx,cy-th,tw,th,[74,44,16]);
+  for(let by=3;by<th-2;by+=4){
+    ibSet(buf,W,H,cx-tw+1,cy-th+by,46,24,8);
+    ibSet(buf,W,H,cx+1,cy-th+by,46,24,8);
+  }
+
+  c.putImageData(id,0,0);
+  return {cv,ox:cx,oy:cy};
+}
+
+// ── Norway pine sprite ────────────────────────────────────────
+// 3 tiers. Each tier rendered row-by-row with ibCRow (Bayer-shaded
+// left-lit/right-shadow), plus needle-droop rows below tier base.
+function makePineSpr(r){
+  const W=(r*2+14)|0, H=(r*4+12)|0;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const cx=(W>>1), cy=H-3;
+  const palRGB=mkPalRGB(['#070f05','#0d1a08','#14240c','#1c3012','#253e18','#2f4e20','#3a6028','#477030']);
+  const id=c.createImageData(W,H);
+  const buf=id.data;
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.58)|0,(r*.18)|0,100);
+  const th=(r*.5)|0;
+  ibRect(buf,W,H,cx-1,cy-th,2,th,[20,36,12]);
+  ibRect(buf,W,H,cx,cy-th,1,th,[7,15,5]);
+  const tiers=[
+    {R:r,          baseY:cy,              off:0},
+    {R:(r*.70)|0,  baseY:cy-r,            off:1},
+    {R:(r*.44)|0,  baseY:(cy-r*1.82)|0,   off:2},
+  ];
+  tiers.forEach(({R,baseY,off})=>{
+    if(R<3)return;
+    const pal=palRGB.slice(off,off+6);
+    for(let row=0;row<R;row++)
+      ibCRow(buf,W,H,cx,baseY-row,R*(1-row/R),pal);
+    for(let e=1;e<=3;e++)
+      ibCRow(buf,W,H,cx,baseY+e,Math.max(1,R*(0.92-e*.18)),pal.slice(0,Math.max(2,5-e)));
+  });
+  const t2=tiers[2];
+  ibSphere(buf,W,H,cx,(t2.baseY-t2.R-2)|0,Math.max(3,(r*.11)|0),palRGB.slice(4));
+  c.putImageData(id,0,0);
+  return {cv,ox:cx,oy:cy};
+}
+
+// ── Tall spruce sprite ────────────────────────────────────────
+// 5 tiers, each ibCRow-rendered. Progressively brighter palette
+// for higher tiers. Tip spike drawn into buffer.
+function makeSpruSpr(r){
+  const W=(r*2+12)|0, H=(r*5+12)|0;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const cx=(W>>1), cy=H-3;
+  const palRGB=mkPalRGB(['#050e06','#0a1a0c','#112614','#19321c','#224026','#2c4e30','#375e3a','#436e44']);
+  const id=c.createImageData(W,H);
+  const buf=id.data;
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.45)|0,(r*.14)|0,90);
+  ibRect(buf,W,H,cx-1,cy-(r*.32)|0,2,(r*.32)|0,palRGB[1]);
+  const tiers=[
+    {R:r,          baseY:cy,             off:0},
+    {R:(r*.76)|0,  baseY:(cy-r*.80)|0,   off:1},
+    {R:(r*.57)|0,  baseY:(cy-r*1.62)|0,  off:2},
+    {R:(r*.40)|0,  baseY:(cy-r*2.48)|0,  off:3},
+    {R:(r*.24)|0,  baseY:(cy-r*3.38)|0,  off:3},
+  ];
+  tiers.forEach(({R,baseY,off})=>{
+    if(R<2)return;
+    const pal=palRGB.slice(off,off+5);
+    for(let row=0;row<R;row++)
+      ibCRow(buf,W,H,cx,baseY-row,R*(1-row/R),pal);
+    for(let e=1;e<=2;e++)
+      ibCRow(buf,W,H,cx,baseY+e,Math.max(1,R*(0.90-e*.20)),pal.slice(0,Math.max(2,4-e)));
+  });
+  const t4=tiers[4];
+  for(let sk=0;sk<Math.max(3,(r*.30)|0);sk++) ibSet(buf,W,H,cx,(t4.baseY-t4.R-sk)|0,...palRGB[4]);
+  c.putImageData(id,0,0);
+  return {cv,ox:cx,oy:cy};
+}
+
+// ── Broad drooping fir sprite ─────────────────────────────────
+// 3 wide tiers with ibCRow. 5 droop rows per tier for signature
+// pendulous branch tips. Palette warmer green.
+function makeFirSpr(r){
+  const W=(r*2+16)|0, H=(r*3+14)|0;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const cx=(W>>1), cy=H-3;
+  const palRGB=mkPalRGB(['#060d04','#0e1c08','#16280e','#1e3614','#274618','#315820','#3c6a28','#497c30']);
+  const id=c.createImageData(W,H);
+  const buf=id.data;
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.72)|0,(r*.22)|0,100);
+  ibRect(buf,W,H,cx-1,cy-(r*.40)|0,2,(r*.40)|0,palRGB[1]);
+  const tiers=[
+    {R:r,          baseY:cy,             off:0},
+    {R:(r*.82)|0,  baseY:(cy-r*.76)|0,   off:1},
+    {R:(r*.60)|0,  baseY:(cy-r*1.56)|0,  off:2},
+  ];
+  tiers.forEach(({R,baseY,off})=>{
+    if(R<3)return;
+    const pal=palRGB.slice(off,off+6);
+    for(let row=0;row<R;row++)
+      ibCRow(buf,W,H,cx,baseY-row,R*(1-row/R),pal);
+    for(let e=1;e<=5;e++)
+      ibCRow(buf,W,H,cx,baseY+e,Math.max(1,R*(0.95-e*.12)),pal.slice(0,Math.max(2,5-e)));
+  });
+  const t2=tiers[2];
+  for(let sk=0;sk<Math.max(2,(r*.42)|0);sk++) ibSet(buf,W,H,cx,(t2.baseY-t2.R-sk)|0,...palRGB[5]);
+  c.putImageData(id,0,0);
+  return {cv,ox:cx,oy:cy};
+}
+
+// ── Scots pine sprite ─────────────────────────────────────────
+// Tall tapered orange trunk + flat umbrella crown of ibSphere lobes.
+function makeScotsSpr(r){
+  const tH=(r*2.6)|0;
+  const W=(r*3+10)|0, H=(tH+r*1.8+10)|0;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const cx=(W>>1), cy=H-3;
+  const crownPal=mkPalRGB(['#080e06','#101a0c','#192814','#24381c','#304826','#3c5830','#486838','#567840']);
+  const id=c.createImageData(W,H);
+  const buf=id.data;
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.62)|0,(r*.18)|0,90);
+  // Tapered trunk
+  const tw=Math.max(2,(r*.20)|0);
+  for(let row=0;row<tH;row++){
+    const t=row/tH, w2=tw+(t<.15?(1-t/.15)*2|0:0);
+    ibRect(buf,W,H,cx-w2,cy-row,w2,1,[122,74,30]);
+    ibRect(buf,W,H,cx,cy-row,tw,1,[74,46,12]);
+  }
+  for(let by=5;by<tH-5;by+=7){
+    ibSet(buf,W,H,cx-tw+1,cy-by,44,24,8);
+    ibSet(buf,W,H,cx+1,cy-by,44,24,8);
+  }
+  ibRect(buf,W,H,cx-tw-2,cy-5,4,6,[62,32,8]);
+  ibRect(buf,W,H,cx+tw-1,cy-5,4,6,[62,32,8]);
+  // Flat umbrella crown: 3 ibSphere lobes
+  const crownY=(cy-tH-(r*.55))|0;
+  [
+    {lx:cx-(r*.52)|0, ly:crownY,           sr:(r*.62)|0},
+    {lx:cx+(r*.52)|0, ly:crownY,           sr:(r*.62)|0},
+    {lx:cx,           ly:crownY-(r*.10)|0, sr:(r*.52)|0},
+  ].forEach(({lx,ly,sr})=>ibSphere(buf,W,H,lx,ly,sr,crownPal));
+  c.putImageData(id,0,0);
+  return {cv,ox:cx,oy:cy};
+}
+
+// ── Shrub sprite ──────────────────────────────────────────────
+// Pure ibSphere lobe soup — no base fill. Fibonacci spiral placement.
+function makeShrubSpr(r){
+  const W=(r*3+6)|0, H=(r*2+6)|0;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const cx=(W>>1), cy=H-2;
+  const palRGB=mkPalRGB(['#0a1606','#121e0c','#1c2e12','#26401a','#305020','#3a6028','#466e30','#527c38']);
+  const id=c.createImageData(W,H);
+  const buf=id.data;
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.82)|0,(r*.24)|0,90);
+  const rng=mkRng(r*3571+7);
+  const cY=cy-(r*.70)|0;
+  // Interior back clusters
+  for(let i=0;i<5;i++){
+    const a=rng()*Math.PI*2,d=rng()*r*.45;
+    ibSphere(buf,W,H,(cx+Math.cos(a)*d)|0,(cY+Math.sin(a)*d*.80)|0,
+      Math.max(3,(r*(0.22+rng()*.18))|0), palRGB.slice(0,5));
+  }
+  // Main Fibonacci-spiral lobes
+  for(let i=0;i<16;i++){
+    const a=i*1.618*Math.PI*2+rng()*.5;
+    const dist=r*(0.1+rng()*.72);
+    const lx=cx+Math.cos(a)*dist, ly=cY+Math.sin(a)*dist*.80;
+    const isLit=(-Math.cos(a)-Math.sin(a))>.38;
+    ibSphere(buf,W,H,lx|0,ly|0,
+      Math.max(3,(r*(0.20+rng()*.22))|0), palRGB.slice(isLit?3:1,isLit?8:6));
+  }
+  // Top highlights
+  for(let i=0;i<4;i++){
+    const a=-Math.PI*.75+(rng()-.5)*Math.PI*.8;
+    const d=r*(0.1+rng()*.45);
+    ibSphere(buf,W,H,(cx+Math.cos(a)*d)|0,(cY+Math.sin(a)*d*.75)|0,
+      Math.max(3,(r*(0.16+rng()*.12))|0), palRGB.slice(5));
+  }
+  c.putImageData(id,0,0);
+  return {cv,ox:cx,oy:cy};
+}
+
+// ── Sprite lazy cache ─────────────────────────────────────────
+function getTreeSpr(type,r){
+  const rr=Math.max(4,Math.round(r/4)*4);
+  const key=type+'_'+rr;
+  if(!SP[key]) SP[key]=
+    type===0?makeDecidSpr(rr):
+    type===1?makePineSpr(rr):
+    type===2?makeSpruSpr(rr):
+    type===3?makeFirSpr(rr):
+             makeScotsSpr(rr);
+  return SP[key];
+}
+function getShrubSpr(r){
+  const rr=Math.max(3,Math.round(r/3)*3);
+  const key='s'+rr;
+  if(!SP[key]) SP[key]=makeShrubSpr(rr);
+  return SP[key];
+}
+
+// ── Ground ────────────────────────────────────────────────────
+// Grass: 6-shade palette, Bayer-dithered world-space noise.
+// Stones: 1% of pixels tinted grey-brown (AoE2 ground texture feel).
+// Patches: drawn with dithered edges into same ImageData buffer.
+function drawGround(){
+  const id=pixCtx.createImageData(pixW,pixH);
+  const buf=id.data;
+  const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
+  const gPal=[
+    [38,68,16],[47,80,20],[56,90,22],[66,104,28],[76,116,34],[88,130,40]
+  ];
+  const sPal=[[74,62,44],[90,76,56],[62,52,36]]; // stone shades
+
+  for(let py=0;py<pixH;py++){
+    for(let px=0;px<pixW;px++){
+      const wx=cpx+px, wy=cpy+py;
+      const h1=((wx*17)^(wy*31))&0xff;
+      const h2=((wx*41)^(wy*19))&0xff;
+      const h3=((wx*7 )^(wy*53))&0xff;
+      const p=4*(py*pixW+px);
+
+      // Stone scatter: ~1.2% of pixels
+      if(((h1^h2^h3)&0x7f)<10){
+        const sc=sPal[(h3>>5)%3];
+        buf[p]=sc[0];buf[p+1]=sc[1];buf[p+2]=sc[2];buf[p+3]=255;
+        continue;
+      }
+      // Grass shade via Bayer-dithered noise
+      const noise=(h1*140+h2*80+h3*35)>>8;  // 0-199
+      const fi=noise*(gPal.length-1)/199;
+      const i0=Math.min(gPal.length-2,fi|0);
+      const pick=(fi-i0)*16>b4(px+cpx,py+cpy)?i0+1:i0;
+      const g=gPal[pick];
+      buf[p]=g[0];buf[p+1]=g[1];buf[p+2]=g[2];buf[p+3]=255;
+    }
+  }
+
+  // Dark and light patches dithered into buffer
+  PATCHES.forEach(patch=>{
+    const sx=wpx(patch.x*WW), sy=wpy(patch.y*WH);
+    const sw=Math.max(1,patch.w*WW/PS|0), sh=Math.max(1,patch.h*WH/PS|0);
+    const pPal=patch.d?[[32,50,10],[42,64,14]]:[[84,124,36],[96,140,42]];
+    for(let row=sy;row<sy+sh;row++){
+      for(let col=sx;col<sx+sw;col++){
+        if(col<0||row<0||col>=pixW||row>=pixH)continue;
+        // Dithered edge: 4px fade zone
+        const edgeX=Math.min(col-sx,sx+sw-1-col);
+        const edgeY=Math.min(row-sy,sy+sh-1-row);
+        const edge=Math.min(edgeX,edgeY);
+        if(edge<4&&b4(col+cpx,row+cpy)>edge*4)continue;
+        const pick=b4(col+cpx,row+cpy)>8?1:0;
+        const c=pPal[pick];
+        const pp=4*(row*pixW+col);
+        buf[pp]=c[0];buf[pp+1]=c[1];buf[pp+2]=c[2];buf[pp+3]=255;
+      }
+    }
   });
 
-  // Tiny cross-shaped flowers
+  pixCtx.putImageData(id,0,0);
+
+  // Flowers (on top of base)
   FLOWERS.forEach(f=>{
     const sx=wpx(f.x*WW), sy=wpy(f.y*WH);
     if(sx<-2||sx>pixW+2||sy<-2||sy>pixH+2) return;
     pr(sx,sy-1,1,1,f.c); pr(sx-1,sy,1,1,f.c);
-    pr(sx,sy,1,1,P.fl2);  // yellow centre
-    pr(sx+1,sy,1,1,f.c); pr(sx,sy+1,1,1,f.c);
+    pr(sx,sy,1,1,'#d8c840');
+    pr(sx+1,sy,1,1,f.c);  pr(sx,sy+1,1,1,f.c);
   });
 }
 
 // ── Rivers ────────────────────────────────────────────────────
+// Banks: 3-ring earth transition. Water body with animated flow dots.
 function drawRivers(){
+  const tick=Math.floor(gameTime*5);
   RIVERS.forEach(pts=>{
     const pxPts=pts.map(p=>({x:wpx(p.x*WW),y:wpy(p.y*WH)}));
     for(let i=0;i<pxPts.length-1;i++){
       const {x:x0,y:y0}=pxPts[i], {x:x1,y:y1}=pxPts[i+1];
-      if(x0<-10&&x1<-10||x0>pixW+10&&x1>pixW+10) continue;
-      pixLine(x0,y0,x1,y1,7,P.riverB);   // sandy bank
-      pixLine(x0,y0,x1,y1,4,P.riverW);   // water
-      // animated shimmer pixel per segment
-      const tick=Math.floor(gameTime*4)%4;
-      const f=((i*3+tick)%4)/4;
-      const sx=(x0+(x1-x0)*f|0), sy=(y0+(y1-y0)*f|0);
-      pr(sx,sy,1,1,P.waterL);
+      if(x0<-14&&x1<-14||x0>pixW+14&&x1>pixW+14) continue;
+      // Earth banks
+      pixLine(x0,y0,x1,y1,14,'#7a6018');
+      pixLine(x0,y0,x1,y1,12,'#8a7020');
+      pixLine(x0,y0,x1,y1,10,'#6a5010');
+      // Water body (dark → mid → highlight)
+      pixLine(x0,y0,x1,y1,7,'#0c2e50');
+      pixLine(x0,y0,x1,y1,5,'#185880');
+      pixLine(x0,y0,x1,y1,3,'#2878b0');
+      pixLine(x0,y0,x1,y1,1,'#40a0d8');
+      // Flow dots — two animated dots per segment
+      for(let d=0;d<2;d++){
+        const f=((i*7+d*5+tick)%12)/12;
+        const dx=(x0+(x1-x0)*f)|0, dy=(y0+(y1-y0)*f)|0;
+        pr(dx,dy,2,1,'#80c8f0');
+        pr(dx-1,dy+1,1,1,'#50a0d0');
+      }
     }
   });
 }
 
 // ── Water bodies ─────────────────────────────────────────────
+// Shore: 5-ring gradient (bright sand → wet sand → silt → shallow → deep).
+// Water: depth-gradient fill + diagonal Bayer-dithered wave pattern.
+// Animated highlights as short bright dashes in upper quadrant.
 function drawWater(w,wi){
   const cx=wpx(w.x*WW), cy=wpy(w.y*WH);
-  const rx=Math.max(2,(w.rx*WW/PS)|0), ry=Math.max(2,(w.ry*WH/PS)|0);
+  const rx=Math.max(3,(w.rx*WW/PS)|0), ry=Math.max(3,(w.ry*WH/PS)|0);
   if(cx+rx<0||cx-rx>pixW||cy+ry<0||cy-ry>pixH) return;
 
-  // Sandy shore (+1 border)
-  pr(cx-rx-1,cy-ry,   rx*2+2, ry*2,   P.shore);
-  pr(cx-rx,  cy-ry-1, rx*2,   ry*2+2, P.shore);
+  // Shore rings: bright sand → dark mud, largest first
+  const shoreRings=[
+    {off:5, col:'#cca840'},  // dry sand
+    {off:4, col:'#b89030'},  // sand
+    {off:3, col:'#a07828'},  // wet sand
+    {off:2, col:'#7a5c18'},  // wet mud
+    {off:1, col:'#5c4010'},  // dark silt
+  ];
+  shoreRings.forEach(({off,col})=>{
+    pixCtx.fillStyle=col;
+    for(let dy=-(ry+off);dy<=ry+off;dy++){
+      const rw=Math.round((rx+off)*Math.sqrt(Math.max(0,1-(dy/(ry+off))**2)));
+      if(rw>0) pixCtx.fillRect(cx-rw,cy+dy,rw*2,1);
+    }
+  });
 
-  // Water fill
-  pr(cx-rx,cy-ry,rx*2,ry*2,P.water);
+  // Water body rendered into a local ImageData region (avoids per-pixel fillStyle)
+  const tick=Math.floor(gameTime*2);
+  const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
+  const bx0=Math.max(0,cx-rx-1), bx1=Math.min(pixW,cx+rx+2);
+  const by0=Math.max(0,cy-ry-1), by1=Math.min(pixH,cy+ry+2);
+  const bw=bx1-bx0, bh=by1-by0;
+  if(bw>0&&bh>0){
+    const wid=pixCtx.getImageData(bx0,by0,bw,bh);
+    const wb=wid.data;
+    // Depth palette: very deep → bright surface (precomputed RGB)
+    const wPal=[[10,32,60],[14,52,88],[22,78,128],[34,104,160],[52,132,190]];
+    for(let row=0;row<bh;row++){
+      const py=by0+row, dy=py-cy;
+      for(let col=0;col<bw;col++){
+        const px=bx0+col, dx=px-cx;
+        if(dx*dx/(rx*rx)+dy*dy/(ry*ry)>1.01) continue;
+        const depth=1-Math.sqrt((dx/rx)**2+(dy/ry)**2);
+        const wave=(px-py+tick)&7;
+        let shade=depth*3.5+((wave<2)?0.8:0);
+        shade=Math.max(0,Math.min(wPal.length-1-1e-4,shade));
+        const i0=shade|0;
+        const pick=(shade-i0)*16>b4(px+cpx,py+cpy)?i0+1:i0;
+        const c=wPal[pick], bp=4*(row*bw+col);
+        wb[bp]=c[0];wb[bp+1]=c[1];wb[bp+2]=c[2];wb[bp+3]=255;
+      }
+    }
+    pixCtx.putImageData(wid,bx0,by0);
+  }
 
-  // Horizontal shimmer lines (animated)
-  const tick=Math.floor(gameTime*3)%3;
-  pixCtx.fillStyle=P.waterL;
-  for(let row=cy-ry+(3-tick)%3;row<cy+ry;row+=3)
-    pixCtx.fillRect(cx-rx+2,row,rx*2-4,1);
-
-  // Glint pixel top-left
-  pr(cx-rx/2|0, cy-ry/2|0, 2, 1, P.waterL);
-
-  // Corner cut (makes it less square)
-  pr(cx-rx,cy-ry,2,2,P.grass); pr(cx+rx-2,cy-ry,2,2,P.grass);
-  pr(cx-rx,cy+ry-2,2,2,P.grass); pr(cx+rx-2,cy+ry-2,2,2,P.grass);
+  // Animated wave highlights: short bright dashes, upper half only
+  const htick=Math.floor(gameTime*3);
+  const wRng=mkRng(wi*137+htick*41);
+  for(let i=0;i<Math.max(3,rx>>2);i++){
+    const ha=wRng()*Math.PI*1.2-Math.PI*.9;  // upper-left arc
+    const hd=rx*(0.20+wRng()*.65);
+    const hx=(cx+Math.cos(ha)*hd)|0, hy=(cy+Math.sin(ha)*hd*.75)|0;
+    const hw=Math.max(2,2+(wRng()*4)|0);
+    pr(hx,hy,hw,1,'#70c8f0');
+    pr(hx+1,hy-1,hw-1,1,'#a8e0ff');
+  }
+  // Strong glint upper-left
+  pr((cx-rx*.35)|0,(cy-ry*.38)|0,4,1,'#c0ecff');
+  pr((cx-rx*.28)|0,(cy-ry*.30)|0,2,1,'#ffffff');
 
   // Lily pads on smaller ponds
-  if(rx < pixW*.08){
+  if(rx<pixW*.08){
     const lr=mkRng(wi*71+13);
     const nL=2+Math.floor(lr()*3);
     for(let i=0;i<nL;i++){
       const la=lr()*Math.PI*2, ld=lr()*(rx*.6);
       const lx=(cx+Math.cos(la)*ld)|0, ly=(cy+Math.sin(la)*ld*.7)|0;
-      const ls=Math.max(2,(rx*.18+lr()*rx*.1)|0);
-      // pad body
-      pr(lx-ls,ly-ls/2|0,ls*2,ls,P.lpad);
-      // gap (lily pad has a notch)
-      pr(lx,ly-ls/2|0,1,ls/2|0,P.water);
-      // flower on some
-      if(lr()>.5){
-        pr(lx-1,ly-ls/2|0-1,3,2,'#f8d0e0');
-        pr(lx,  ly-ls/2|0-2,1,1,P.fl2);
-      }
+      const ls=Math.max(2,(rx*.20+lr()*rx*.12)|0);
+      pr(lx-ls,ly-(ls*.5)|0,ls*2,ls,'#162c08');
+      pr(lx-ls+1,ly-(ls*.5)|0+1,ls*2-2,Math.max(1,ls-2),'#234a12');
+      pr(lx,ly-(ls*.5)|0,1,(ls*.5)|0,'#185880');
+      if(lr()>.5){ pr(lx-1,ly-(ls*.5)|0-1,3,2,'#f8d0e0'); pr(lx,ly-(ls*.5)|0-2,1,1,'#ffd020'); }
     }
-    // reed sticks
+    // Reeds
     const nr=mkRng(wi*53+7);
     for(let i=0;i<4;i++){
-      const ra=nr()*Math.PI*2, rd=rx*(0.85+nr()*.15);
-      const rx2=(cx+Math.cos(ra)*rd)|0, ry2=(cy+Math.sin(ra)*rd*.7)|0;
-      const rh=Math.max(3,(rx*.7+nr()*rx*.4)|0);
-      pixLine(rx2,ry2,rx2+(nr()-.5)*2|0,ry2-rh,1,P.riverB);
-      pr(rx2-1,ry2-rh-1,2,3,P.trunkD); // bulrush head
+      const ra=nr()*Math.PI*2, rd=rx*(0.82+nr()*.16);
+      const bx=(cx+Math.cos(ra)*rd)|0, bby=(cy+Math.sin(ra)*rd*.7)|0;
+      const rh=Math.max(3,(rx*.65+nr()*rx*.45)|0);
+      pixLine(bx,bby,bx+(nr()-.5)*2|0,bby-rh,1,'#8a6820');
+      pr(bx-1,bby-rh-1,2,3,'#3e1a08');
     }
   }
 }
 function drawWaters(){ WATER_DEF.forEach((w,i)=>drawWater(w,i)); }
 
-// ── Hills ─────────────────────────────────────────────────────
+// ── Mountains ─────────────────────────────────────────────────
 function drawHill(m){
   const cx=wpx(m.x*WW), cy=wpy(m.y*WH);
   const w=(m.s*Math.min(WW,WH)*.20/PS)|0, h=(m.s*Math.min(WW,WH)*.16/PS)|0;
   if(cx+w<0||cx-w>pixW||cy<0||cy-h>pixH) return;
 
-  // Draw rows bottom→top, each narrower (stepped silhouette)
+  // 5-tone rock silhouette
   for(let row=0;row<=h;row++){
     const t=row/h;
-    const rw=Math.round(w*(1-t*t*0.9));  // parabolic shoulder
-    const c=t>.85?P.snow : t>.55?P.hillL : t>.25?P.hill : P.hillD;
-    pr(cx-rw, cy-row, rw*2, 1, c);
+    const rw=Math.round(w*(1-t*t*0.9));
+    const col=t>.90?'#d0c2b0':t>.74?'#b09888':t>.52?'#8c7a68':t>.30?'#6a5a48':'#4a3a2c';
+    pr(cx-rw,cy-row,rw*2,1,col);
   }
 
-  // Dark shadow row at base
-  pr(cx-w, cy, w*2, 2, P.hillD);
+  // Geological strata lines
+  for(let row=Math.floor(h*.14);row<Math.floor(h*.82);row+=Math.max(3,Math.floor(h*.10))){
+    const t=row/h, rw=Math.round(w*(1-t*t*.9));
+    pr(cx-rw+2,cy-row,Math.max(2,rw*2-4),1,'#7a6858');
+    // Dither edges of strata
+    if(rw>8){
+      for(let dx=0;dx<4;dx++){
+        pr(cx-rw+dx,cy-row,1,1,((cx-rw+dx+cy-row)&1)?'#7a6858':'#6a5a48');
+        pr(cx+rw-dx-2,cy-row,1,1,((cx+rw-dx+cy-row)&1)?'#7a6858':'#6a5a48');
+      }
+    }
+  }
 
-  // Scattered pixel flowers at foot
-  const fr=mkRng(m.x*777+m.y*333|0);
-  for(let i=0;i<6;i++){
-    const fx=(cx+(fr()-.5)*w*1.6)|0, fy=(cy-fr()*h*.25)|0;
-    pr(fx,fy,1,1,fr()>.5?P.fl1:P.fl3);
+  // Rock face crevices with lit counter-edge
+  const cr=mkRng(m.x*511+m.y*211|0);
+  for(let i=0;i<10+Math.floor(m.s*8);i++){
+    const crx=(cx+(cr()-.5)*w*1.3)|0, cry=(cy-cr()*h*.82)|0;
+    const crl=2+Math.floor(cr()*6);
+    for(let j=0;j<crl;j++)   pr(crx+j,cry-j,1,1,'#2a1810');
+    for(let j=0;j<crl-1;j++) pr(crx+j-1,cry-j+1,1,1,'#9a8878');
+  }
+
+  // Base shadow
+  pr(cx-w,cy,w*2,3,'#2a1810');
+  for(let dx=0;dx<w*2;dx++) if((cx-w+dx+cy)&1) pr(cx-w+dx,cy+3,1,1,'#3a2c20');
+
+  // Snow cap
+  if(m.s>.60){
+    const fr=mkRng(m.x*333+m.y*777|0);
+    const sr=Math.floor(h*.83), st=sr/h;
+    const srw=Math.round(w*(1-st*st*.9));
+    pr(cx-srw,cy-sr,srw*2,1,'#c8c0b0');
+    for(let i=0;i<8+Math.floor(m.s*4);i++){
+      const fx=(cx+(fr()-.5)*srw*.85)|0, fy=(cy-sr-fr()*h*.14)|0;
+      pr(fx,fy,2,1,'#ccc4b2'); pr(fx+1,fy-1,1,1,'#eae4dc');
+    }
+  }
+
+  // Foot scrub
+  const fpr=mkRng(m.x*777+m.y*333|0);
+  for(let i=0;i<5;i++){
+    const fx=(cx+(fpr()-.5)*w*1.6)|0, fy=(cy-fpr()*h*.18)|0;
+    pr(fx,fy,1,1,'#1a3008'); pr(fx+1,fy-1,1,1,'#283018');
   }
 }
 
-// ── Round deciduous tree ──────────────────────────────────────
+// ── Tree draw (sprite blit) ───────────────────────────────────
 function drawRoundTree(wx,wy,sz){
-  const x=wpx(wx), y=wpy(wy);
-  const r=Math.max(3,(sz/PS)|0);
+  const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r*2<0||x-r*2>pixW||y+r<0||y-r*4>pixH) return;
-
-  // Trunk
-  pr(x-1,y-r,2,r,P.trunk); pr(x-2,y,4,1,P.trunkD);
-
-  // Three overlapping canopy circles (back left, back right, front center)
-  pixCircle(x-r/2|0, y-r-r/3|0, (r*.72)|0, P.leaf);
-  pixCircle(x+r/2|0, y-r-r/3|0, (r*.72)|0, P.leaf);
-  pixCircle(x,       y-r-r*.55|0, r,        P.leafM);
-  pixCircle(x,       y-r-r,      (r*.55)|0, P.leafL); // top highlight
+  const s=getTreeSpr(0,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
-
-// ── Pine tree ─────────────────────────────────────────────────
 function drawPineTree(wx,wy,sz){
-  const x=wpx(wx), y=wpy(wy);
-  const r=Math.max(3,(sz/PS)|0);
-  if(x+r<0||x-r>pixW||y<0||y-r*3>pixH) return;
-
-  // Trunk
-  pr(x-1,y-r/2|0,2,(r/2)|0,P.trunkD);
-
-  // Three triangular tiers, wider at bottom
-  const tiers=[[r,0,P.pine],[r*.7|0,r,P.pineM],[(r*.4)|0,r*1.8|0,P.pineL]];
-  tiers.forEach(([tr,ty,c])=>{
-    pixCtx.fillStyle=c;
-    for(let row=0;row<tr;row++){
-      const rw=Math.round(tr*(1-row/tr));
-      pixCtx.fillRect(x-rw,y-ty-row,rw*2,1);
-    }
-  });
+  const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
+  if(x+r<0||x-r>pixW||y<0||y-r*4>pixH) return;
+  const s=getTreeSpr(1,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
-
-// ── Tall narrow spruce ────────────────────────────────────────
 function drawSpruce(wx,wy,sz){
-  const x=wpx(wx), y=wpy(wy);
-  const r=Math.max(3,(sz*.72/PS)|0);
-  const H=r*4;
-  if(x+r+2<0||x-r-2>pixW||y<0||y-H>pixH) return;
-
-  pr(x-1,y-r/5|0,2,(r/5)|0,P.trunkD);
-
-  for(let row=0;row<H;row++){
-    const t=row/H;
-    const rw=Math.max(1,Math.round(r*t*.90));
-    const c=t<.3?P.sprL:t<.6?P.sprM:P.spr;
-    pr(x-rw,y-row,rw*2,1,c);
-    // branch-tip jut every 4 rows on the wider lower half
-    if(row>4&&row%4===0&&rw>2){
-      pr(x-rw-1,y-row,1,1,c);
-      pr(x+rw,  y-row,1,1,c);
-    }
-  }
+  const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz*.72/PS)|0);
+  if(x+r+2<0||x-r-2>pixW||y<0||y-r*5>pixH) return;
+  const s=getTreeSpr(2,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
-
-// ── Wide drooping fir ─────────────────────────────────────────
 function drawBroadFir(wx,wy,sz){
-  const x=wpx(wx), y=wpy(wy);
-  const r=Math.max(3,(sz*1.10/PS)|0);
-  const H=(r*2.5)|0;
-  if(x+r+3<0||x-r-3>pixW||y<0||y-H>pixH) return;
-
-  pr(x-1,y-r/3|0,2,(r/3)|0,P.trunkD);
-
-  const tierH=(H/3)|0;
-  for(let tier=0;tier<3;tier++){
-    const bR=(r*(1-tier*.17))|0;
-    const bY=(y-tier*tierH*.80)|0;
-    const c=tier===2?P.firL:tier===1?P.firM:P.fir;
-    pixCtx.fillStyle=c;
-    for(let row=0;row<tierH;row++){
-      const rw=Math.max(1,Math.round(bR*(1-row/tierH*.80)));
-      // drooping tips at the bottom of each tier
-      const droop=row<3?2-row:0;
-      pixCtx.fillRect(x-rw-droop, bY-row, rw*2+droop*2, 1);
-    }
-  }
-  // Narrow tip spike
-  pr(x,y-H,1,(tierH/2)|0,P.firL);
+  const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz*1.10/PS)|0);
+  if(x+r+3<0||x-r-3>pixW||y<0||y-r*3>pixH) return;
+  const s=getTreeSpr(3,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
-
-// ── Scots pine (tall trunk, flat umbrella crown) ───────────────
 function drawScotsPine(wx,wy,sz){
-  const x=wpx(wx), y=wpy(wy);
-  const r=Math.max(3,(sz/PS)|0);
-  const tH=r*2;
-  if(x+r*1.6<0||x-r*1.6>pixW||y<0||y-r*3.8>pixH) return;
-
-  // Tall reddish trunk, slightly tapered
-  pixCtx.fillStyle=P.scots;
-  for(let i=0;i<tH;i++) pixCtx.fillRect(x-1,y-i,2+(i<tH/4?1:0),1);
-  // Bark marks
-  pr(x,   y-(tH*.35)|0, 1, 2, P.scotsD);
-  pr(x-1, y-(tH*.65)|0, 1, 2, P.scotsD);
-
-  // Wide flat crown: two side blobs + smaller centre
-  const cY=(y-tH-(r*.75))|0;
-  pixCircle(x-(r*.50)|0, cY, (r*.65)|0, P.pine);
-  pixCircle(x+(r*.50)|0, cY, (r*.65)|0, P.pine);
-  pixCircle(x,           cY-(r*.18)|0, (r*.48)|0, P.pineM);
+  const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
+  if(x+r*2<0||x-r*2>pixW||y<0||y-r*5>pixH) return;
+  const s=getTreeSpr(4,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
 
 // ── Shrub ─────────────────────────────────────────────────────
 function drawShrub(sh){
-  const x=wpx(sh.x*WW), y=wpy(sh.y*WH);
-  if(x<-8||x>pixW+8||y<-8||y>pixH+8) return;
-  const r=Math.max(2,(Math.min(VW,VH)*sh.m*.022/PS)|0);
-
-  pixCircle(x-r/2|0, y-r/3|0, (r*.72)|0, P.shrub);
-  pixCircle(x+r/2|0, y-r/4|0, (r*.68)|0, P.shrubL);
-  pixCircle(x,        y-r*.6|0, r,         P.shrub);
-
+  const x=wpx(sh.x*WW),y=wpy(sh.y*WH);
+  if(x<-28||x>pixW+28||y<-28||y>pixH+8) return;
+  const r=Math.max(3,(treeSz*sh.m*.28/PS)|0);
+  const s=getShrubSpr(r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
   if(sh.berries){
     const br=mkRng(sh.x*999+sh.y*137|0);
-    for(let i=0;i<3;i++){
+    for(let i=0;i<4;i++){
       const ba=br()*Math.PI*2, bd=r*(0.3+br()*.5);
-      pr((x+Math.cos(ba)*bd)|0,(y+Math.sin(ba)*bd-r/2)|0,1,1,br()>.5?'#cc1010':'#102090');
+      pr((x+Math.cos(ba)*bd)|0,(y+Math.sin(ba)*bd-r*.5)|0,2,2,br()>.5?'#cc1010':'#1020a0');
     }
   }
 }
@@ -628,111 +979,157 @@ function drawShrub(sh){
 function drawMushroom(m){
   if(m.collected) return;
   const x=wpx(m.fx*WW), y=wpy(m.fy*WH);
-  if(x<-14||x>pixW+14||y<-16||y>pixH+4) return;
-  const s=Math.max(2,(Math.min(VW,VH)*.048/PS)|0); // ~8px art at 720p/PS4
+  if(x<-20||x>pixW+20||y<-24||y>pixH+4) return;
+  const s=Math.max(1,Math.min(4,(treeSz*.12/PS)|0));
 
-  // Stem
-  pr(x-s/2|0, y-s*2, s, s*2, P.mushrS);
-  pr(x-s/2-1|0, y-s, s+2, 1, P.mushrS); // wider base
+  // Shadow
+  pr(x-s,y+1,s*2,1,'#2a3a10');
 
-  // Cap dome: rows that widen then narrow
-  const capRows=[
-    [s*.9|0, s*2],  [s*1.3|0, s*1.7|0],
-    [s*1.6|0, s*1.4|0], [s*1.8|0, s*1.1|0],
-    [s*1.9|0, s*.8|0],  [s*1.7|0, s*.5|0],
-    [s*1.3|0, s*.25|0], [s*.7|0,  0],
+  // Stem — layered: left highlight, center mid, right shadow
+  pr(x-s/2|0,    y-s*2, s,   s*2, '#dcd4b0');
+  pr(x-s/2|0,    y-s*2, 1,   s*2, '#f0e8c8');
+  pr(x+s/2-1|0,  y-s*2, 1,   s*2, '#c8c0a0');
+  pr(x-s/2-1|0,  y-s,   s+2, 1,   '#e8e0c0');
+  pr(x-s/2-1|0,  y-s*1.25|0, s+2, 1, '#d0c8a8');
+
+  // Dark underside of cap
+  pr(x-s*2-1|0,  y-s*2, s*4+2, (s*.38)|0, '#4a0808');
+
+  // Cap dome rows — fly agaric
+  const rowDef=[
+    {f:1.70, col:'#8a0e0e'},
+    {f:1.88, col:'#a81414'},
+    {f:2.00, col:'#cc1a1a'},
+    {f:1.98, col:'#dd2424'},
+    {f:1.88, col:'#cc1c1c'},
+    {f:1.68, col:'#bb1818'},
+    {f:1.40, col:'#a81414'},
+    {f:1.05, col:'#961010'},
+    {f:0.66, col:'#840c0c'},
+    {f:0.30, col:'#700808'},
   ];
-  capRows.forEach(([rw,off])=>{
-    const dark=off<s*1.2;
-    pr(x-rw,y-s*2-off,rw*2,Math.max(1,(s*.3)|0),dark?P.mushrCd:P.mushrC);
+  const rowH=Math.max(1,(s*.36)|0);
+  rowDef.forEach(({f,col},i)=>{
+    const rw=(s*f)|0;
+    const yy=y-s*2-(s*.3*i)|0;
+    pr(x-rw,yy,rw*2,rowH,col);
+    pr(x+rw/2|0,yy,(rw*.52)|0,rowH,'#5a0808');
+    if(rw>4) pr(x-rw,yy,Math.max(1,(rw*.20)|0),rowH,'#ee3a3a');
   });
 
-  // White spots (pixel blobs)
-  [[x-s,y-s*3],[x+s*.3|0,y-s*3-s*.6|0],[x-s*.2|0,y-s*4]].forEach(([sx,sy])=>{
-    pr(sx,sy,Math.max(1,s/2|0),Math.max(1,s/2|0),'#f4f4ee');
+  // White spots (3 per cap)
+  const ss=Math.max(2,(s*.65)|0);
+  [[x-s*1.0|0,y-s*3.4|0],[x+s*.5|0,y-s*3.8|0],[x-s*.2|0,y-s*4.6|0]].forEach(([sx,sy])=>{
+    pr(sx-1,sy-1,ss+2,ss,'#dcdcd8');
+    pr(sx,  sy,  ss,  ss,'#f8f8f4');
+    pr(sx+(ss/2)|0,sy+(ss/2)|0,1,1,'#ffffff');
   });
 }
 
 // ── Snufkin ───────────────────────────────────────────────────
+// AoE2-style pixel character: every element has lit/shadow faces,
+// dark 1px outline, 4-frame walk animation with arm swing.
 function drawSnufkin(wx,wy,t,moving){
   const cx=wpx(wx), cy=wpy(wy);
-  const f=char.facing; // 1=right, -1=left
-  const s=Math.max(1,(Math.min(VW,VH)*.012/PS)|0); // unit: ~2px art at 720p/PS4
-  const bob=moving?(Math.floor(t*8)%2):0;
-  const step=moving?Math.floor(t*7)%4:0;
+  const f=char.facing;  // 1=right, -1=left
+  const s=Math.max(1,Math.min(2,(Math.min(VW,VH)*.006/PS)|0));
+  const frame=moving?Math.floor(t*7)%4:0;
+  const bob=(frame===1||frame===3)?-1:0;
 
-  // sp: draw rect at (dx,dy) in sprite units, dx positive = toward facing
+  // sp: place rect at (dx,dy) units from feet centre, flipping for facing
   function sp(dx,dy,w,h,c){
-    const x0=f>0 ? cx+dx*s : cx-(dx+w)*s;
-    pr(x0, cy+dy*s+bob, w*s, h*s, c);
+    const x0=f>0?cx+dx*s:cx-(dx+w)*s;
+    pr(x0,(cy+dy*s)+bob,w*s,h*s,c);
   }
+  // spF: unflipped (hat/pipe always same side)
+  function spF(dx,dy,w,h,c){ pr(cx+dx*s,(cy+dy*s)+bob,w*s,h*s,c); }
 
-  // Shadow
-  pr(cx-s*3,cy,s*6,s,P.grassD);
+  // Ground shadow
+  const sh=Math.max(1,s>>1);
+  pr(cx-s*3,cy,s*7,sh,'#203808');
 
-  // Legs (walk cycle)
-  const llY=(step===1)?-1:(step===3)?1:0;
+  // Walk frames: legs alternate, arms swing opposite
+  const llY=frame===1?-2:frame===3?2:0;
   const lrY=-llY;
-  sp(-3,-4+llY, 2,4, P.belt);   // left leg
-  sp( 1,-4+lrY, 2,4, P.belt);   // right leg
-  sp(-3, llY,   3,1, P.shoe);   // left shoe
-  sp( 1, lrY,   3,1, P.shoe);   // right shoe
+  const laY=frame===1?2:frame===3?-2:0;   // left arm
+  const raY=-laY;                           // right arm
 
-  // Cape (on the "back" side — sticks out opposite to facing within sprite space)
-  sp(-5,-9, 2,6, P.cape);
-  sp(-5,-3, 2,2, P.capeD); // cape hem
+  // ── Legs ──
+  sp(-3,-6+llY, 2,6, P.coat);   // left leg body
+  sp(-2,-6+llY, 1,6, P.coatD);  // left leg shadow
+  sp(-3,   llY, 3,1, P.shoe);   // left shoe
+  sp( 1,-6+lrY, 2,6, P.coat);   // right leg
+  sp( 2,-6+lrY, 1,6, P.coatD);
+  sp( 1,   lrY, 3,1, P.shoe);
 
-  // Body / coat
-  sp(-2,-9, 5,5, P.coat);
-  sp(-2,-5, 5,1, P.coatD); // coat hem
+  // ── Cape (back side, behind body) ──
+  sp(-5,-12, 2,8, P.cape);
+  sp(-5,-12, 1,8, P.capeD);     // cape left-edge shadow
+  sp(-5, -5, 2,2, P.capeD);     // cape lower fold
+
+  // ── Body / coat ──
+  sp(-2,-12, 5,6, P.coat);      // coat body
+  sp( 2,-12, 1,6, P.coatD);     // coat right shadow
+  sp(-2, -7, 5,1, P.coatD);     // coat bottom shadow
 
   // Belt + buckle
-  sp(-2,-5, 5,1, P.belt);
-  sp(-1,-6, 2,2, '#d4a010');
+  sp(-2,-7, 5,1, P.belt);
+  sp(-1,-8, 2,2, '#d4a010');    // brass buckle
+  sp( 0,-8, 1,1, '#f0c030');    // buckle highlight
 
-  // Head
-  sp(-2,-13, 5,4, P.skin);
-  sp( 3,-12, 1,2, P.skinD); // ear
+  // ── Arms ──
+  sp(-5,-11+laY, 2,4, P.cape);  // left arm (cape coloured)
+  sp(-5,-11+laY, 1,4, P.capeD);
+  sp( 3,-11+raY, 2,4, P.coat);  // right arm
+  sp( 4,-11+raY, 1,4, P.coatD);
 
-  // Face features
-  sp(-1,-12, 1,1, P.outline); // left eye (squinting: 1px)
-  sp( 1,-12, 1,1, P.outline); // right eye
-  sp( 0,-11, 1,1, P.skinD);   // nose
-  sp(-1,-10, 1,1, '#904828'); sp(1,-10,1,1,'#904828'); // smile
+  // ── Head ──
+  sp(-2,-16, 5,4, P.skin);      // face
+  sp( 2,-16, 1,4, P.skinD);     // face right shadow
+  sp(-2,-16, 1,1, P.skinD);     // left ear
+  sp(-1,-15, 1,1, P.outline);   // left eye
+  sp( 1,-15, 1,1, P.outline);   // right eye
+  sp( 0,-14, 1,1, P.skinD);     // nose
+  sp(-1,-13, 1,1,'#b86040');    // left cheek blush
+  sp( 1,-13, 1,1,'#b86040');    // right cheek blush
 
-  // Pipe
-  sp( 3,-11, 3,1, P.trunkD);   // stem going right
-  sp( 5,-10, 1,2, P.trunkD);   // bowl going down
-  sp( 4,-10, 2,1, P.trunkD);
-
-  // Pipe smoke (static pixel puffs when idle)
+  // ── Pipe (pipe side — right when facing right) ──
+  sp( 3,-15, 3,1, P.trunkD);
+  sp( 5,-14, 1,2, P.trunkD);
+  sp( 4,-14, 2,1, P.trunkD);
+  // Smoke puffs when idle
   if(!moving){
-    const p=Math.floor(t*2)%4;
-    sp(6,-11-p*2, p>0?2:1, 1, '#d0d0d8');
-    sp(7,-13-p,   1,       1, '#b8b8c8');
+    const pf=Math.floor(t*2)%4;
+    sp(6,-15-pf*2, pf>0?2:1,1,'#d0d0d8');
+    sp(7,-17-pf, 1,1,'#b0b0c0');
   }
 
-  // Hat brim (drawn before body so hat crown goes on top)
-  sp(-4,-13, 8,1, P.hatD); // brim shadow underside
-  sp(-4,-14, 8,1, P.hat);  // brim top
-
-  // Hat crown (tall, floppy — leans slightly)
-  sp(-2,-18, 4,4, P.hat);    // upper crown
-  sp(-2,-15, 4,1, P.hat);    // crown base
-  sp(-2,-15, 4,1, '#c49a3a'); // hat band
-  // Crease / texture
-  sp(-1,-17, 1,2, P.hatD);
+  // ── Hat ──
+  // Wide brim (2 rows, with Bayer dither edge)
+  sp(-4,-17, 8,1, P.hatD);
+  sp(-4,-18, 8,1, P.hat);
+  // Crown: tapers upward for conical Snufkin shape
+  sp(-2,-19, 4,1, P.hat);  sp(-2,-19, 1,1, P.hatD);  // crown row 1
+  sp(-2,-20, 4,1, P.hat);  sp( 1,-20, 1,1, P.hatD);
+  sp(-2,-21, 4,1, P.hat);  sp( 1,-21, 1,1, P.hatD);
+  sp(-1,-22, 3,1, P.hat);  sp( 1,-22, 1,1, P.hatD);
+  sp(-1,-23, 2,1, P.hat);
+  sp( 0,-24, 1,1, P.hat);  // hat tip
+  // Hat band (gold)
+  sp(-2,-18, 4,1,'#c49a3a');
+  sp(-1,-18, 1,1,'#e0b848');   // band highlight
+  // Hat shadow strip
+  sp(-1,-21, 1,2, P.hatD);
 }
 
-// ── Vegetation (depth-sorted) ─────────────────────────────────
+// ── Vegetation ────────────────────────────────────────────────
 let treeSz=0;
-function setTreeSize(){ treeSz=Math.min(VW,VH)*.062; }
+function setTreeSize(){ treeSz=Math.min(VW,VH)*.065; }
 
 function drawVegetation(){
   const pad=Math.min(WW,WH)*.15;
   const x0=cam.x-pad,x1=cam.x+VW+pad,y0=cam.y-pad,y1=cam.y+VH+pad;
   const items=[];
-
   SHRUBS.forEach(sh=>{
     const sx=sh.x*WW,sy=sh.y*WH;
     if(sx>x0&&sx<x1&&sy>y0&&sy<y1) items.push({wy:sy,fn:()=>drawShrub(sh)});
@@ -746,11 +1143,9 @@ function drawVegetation(){
         tr.t===1?()=>drawPineTree(tx,ty,sz):
         tr.t===2?()=>drawSpruce(tx,ty,sz):
         tr.t===3?()=>drawBroadFir(tx,ty,sz):
-                 ()=>drawScotsPine(tx,ty,sz)
-      });
+                 ()=>drawScotsPine(tx,ty,sz)});
     }
   });
-
   items.sort((a,b)=>a.wy-b.wy);
   items.forEach(it=>it.fn());
 }
@@ -785,7 +1180,6 @@ function renderMinimap(){
 
 // ── Render ────────────────────────────────────────────────────
 function render(){
-  // Draw everything to low-res pixel canvas
   pixCtx.clearRect(0,0,pixW,pixH);
   drawGround();
   drawRivers();
@@ -795,8 +1189,6 @@ function render(){
   MUSHROOMS.forEach(m=>drawMushroom(m));
   const moving=Math.abs(char.vx)>5||Math.abs(char.vy)>5;
   drawSnufkin(char.x,char.y,gameTime,moving);
-
-  // Blit to screen — imageSmoothingEnabled=false gives crisp pixel upscale
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(pixCv,0,0,VW,VH);
   renderMinimap();
@@ -809,13 +1201,8 @@ function update(dt){
   const {dx,dy}=inputDir();
   if(dx!==0) char.facing=dx>0?1:-1;
   const nx=char.x+dx*SPEED*dt, ny=char.y+dy*SPEED*dt;
-  if(!blocked(nx,ny)){
-    char.x=nx;
-    char.y=ny;
-  } else {
-    if(!blocked(nx,char.y)) char.x=nx;
-    if(!blocked(char.x,ny)) char.y=ny;
-  }
+  if(!blocked(nx,ny)){ char.x=nx; char.y=ny; }
+  else { if(!blocked(nx,char.y)) char.x=nx; if(!blocked(char.x,ny)) char.y=ny; }
   char.vx=dx*SPEED; char.vy=dy*SPEED;
   easeCamera(dt);
   MUSHROOMS.forEach(m=>{
@@ -840,26 +1227,22 @@ function showWin(){
 
 // ── Resize & init ─────────────────────────────────────────────
 function resize(){
-  const hadPreviousWorld=Boolean(WW&&WH&&MUSHROOMS.length>0);
-  const collectedState=hadPreviousWorld?MUSHROOMS.map(m=>m.collected):null;
-  const charFx=hadPreviousWorld?char.x/WW:.30;
-  const charFy=hadPreviousWorld?char.y/WH:.35;
-  const camFx=hadPreviousWorld?cam.x/WW:0;
-  const camFy=hadPreviousWorld?cam.y/WH:0;
+  const hadWorld=Boolean(WW&&WH&&MUSHROOMS.length>0);
+  const cs=hadWorld?MUSHROOMS.map(m=>m.collected):null;
+  const charFx=hadWorld?char.x/WW:.30, charFy=hadWorld?char.y/WH:.35;
+  const camFx=hadWorld?cam.x/WW:0,    camFy=hadWorld?cam.y/WH:0;
   VW=canvas.width=window.innerWidth;
   VH=canvas.height=window.innerHeight;
   WW=VW*7; WH=VH*7;
   mmCv.width=MM_W; mmCv.height=Math.round(MM_W*VH/VW);
-  // Pixel scale: aim for ~240px wide virtual canvas on any screen
-  PS=Math.max(2,Math.min(8,Math.round(Math.min(VW,VH)/120)));
+  PS=Math.max(1,Math.round(VW/640));
   pixW=Math.ceil(VW/PS); pixH=Math.ceil(VH/PS);
   pixCv.width=pixW; pixCv.height=pixH;
   ctx.imageSmoothingEnabled=false;
+  for(const k in SP) delete SP[k]; // rebuild sprites for new PS
   setTreeSize();
   buildWorld();
-  if(collectedState) {
-    MUSHROOMS.forEach((m,i)=>m.collected=Boolean(collectedState[i]));
-  }
+  if(cs) MUSHROOMS.forEach((m,i)=>m.collected=Boolean(cs[i]));
   char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,charFx*WW));
   char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,charFy*WH));
   cam.x=Math.max(0,Math.min(WW-VW,camFx*WW));
@@ -879,7 +1262,7 @@ function startGame(){
 
 document.getElementById('btn-play').addEventListener('click',startGame);
 window.addEventListener('resize',resize);
-document.getElementById('mapnum').textContent = mapNum;
+document.getElementById('mapnum').textContent=mapNum;
 
 resize();
 startGame();
