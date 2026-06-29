@@ -584,12 +584,12 @@ function showWin(){
 
 // ── Resize & init ─────────────────────────────────────────────
 function resize(){
-  const hadWorld=Boolean(WW&&WH&&MUSHROOMS.length);
-  const collectedState=hadWorld?MUSHROOMS.map(m=>m.collected):null;
-  const charFx=hadWorld?char.x/WW:.30;
-  const charFy=hadWorld?char.y/WH:.35;
-  const camFx=hadWorld?cam.x/WW:0;
-  const camFy=hadWorld?cam.y/WH:0;
+  const hadPreviousWorld=Boolean(WW&&WH&&MUSHROOMS.length>0);
+  const collectedState=hadPreviousWorld?MUSHROOMS.map(m=>m.collected):null;
+  const charFx=hadPreviousWorld?char.x/WW:.30;
+  const charFy=hadPreviousWorld?char.y/WH:.35;
+  const camFx=hadPreviousWorld?cam.x/WW:0;
+  const camFy=hadPreviousWorld?cam.y/WH:0;
   VW=canvas.width=window.innerWidth;
   VH=canvas.height=window.innerHeight;
   WW=VW*7; WH=VH*7;
@@ -597,8 +597,9 @@ function resize(){
   mmCv.height=Math.round(MM_W*VH/VW);
   setFonts();
   buildWorld();
-  if(!hadWorld) return;
-  MUSHROOMS.forEach((m,i)=>m.collected=Boolean(collectedState[i]));
+  if(collectedState) {
+    MUSHROOMS.forEach((m,i)=>m.collected=Boolean(collectedState[i]));
+  }
   char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,charFx*WW));
   char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,charFy*WH));
   cam.x=Math.max(0,Math.min(WW-VW,camFx*WW));
