@@ -136,7 +136,7 @@ function buildWorld() {
   MUSHROOMS = SHROOM_POS.map(([fx,fy])=>({fx,fy,collected:false}));
 
   COLLIDERS = [
-    ...WATER.map(w=>({fx:w.x,fy:w.y,fr:Math.max(w.rx,w.ry)*1.05})),
+    ...WATER.map(w=>({fx:w.x,fy:w.y,frx:w.rx*1.05,fry:w.ry*1.05,shape:'ellipse'})),
     ...MOUNTS.map(m=>({fx:m.x,fy:m.y,fr:m.s*.07})),
   ];
 
@@ -209,6 +209,12 @@ function inputDir() {
 // ── Collision ─────────────────────────────────────────────────
 function blocked(nx,ny) {
   for(const c of COLLIDERS) {
+    if(c.shape==='ellipse') {
+      const dx=(nx-c.fx*WW)/(c.frx*WW+CHAR_R);
+      const dy=(ny-c.fy*WH)/(c.fry*WH+CHAR_R);
+      if(dx*dx+dy*dy<1) return true;
+      continue;
+    }
     if(Math.hypot(nx-c.fx*WW,ny-c.fy*WH) < c.fr*Math.min(WW,WH)+CHAR_R) return true;
   }
   return false;
@@ -537,15 +543,15 @@ function update(dt){
 
   const {dx,dy}=inputDir();
   if(dx!==0) char.facing=dx>0?1:-1;
-  const nx=char.x+dx*SPEED*dt, ny=char.y+dy*SPEED*dt;
+  const nx=Math.max(CHAR_R,Math.min(WW-CHAR_R,char.x+dx*SPEED*dt));
+  const ny=Math.max(CHAR_R,Math.min(WH-CHAR_R,char.y+dy*SPEED*dt));
 
   if(!blocked(nx,ny)){
-    char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,nx));
-    char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,ny));
-  } else if(!blocked(nx,char.y)){
-    char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,nx));
-  } else if(!blocked(char.x,ny)){
-    char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,ny));
+    char.x=nx;
+    char.y=ny;
+  } else {
+    if(!blocked(nx,char.y)) char.x=nx;
+    if(!blocked(char.x,ny)) char.y=ny;
   }
   char.vx=dx*SPEED; char.vy=dy*SPEED;
 
@@ -578,6 +584,12 @@ function showWin(){
 
 // ── Resize & init ─────────────────────────────────────────────
 function resize(){
+  const hadWorld=Boolean(WW&&WH&&MUSHROOMS.length);
+  const collectedState=hadWorld?MUSHROOMS.map(m=>m.collected):null;
+  const charFx=hadWorld?char.x/WW:.30;
+  const charFy=hadWorld?char.y/WH:.35;
+  const camFx=hadWorld?cam.x/WW:0;
+  const camFy=hadWorld?cam.y/WH:0;
   VW=canvas.width=window.innerWidth;
   VH=canvas.height=window.innerHeight;
   WW=VW*7; WH=VH*7;
@@ -585,6 +597,13 @@ function resize(){
   mmCv.height=Math.round(MM_W*VH/VW);
   setFonts();
   buildWorld();
+  if(!hadWorld) return;
+  MUSHROOMS.forEach((m,i)=>m.collected=Boolean(collectedState[i]));
+  char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,charFx*WW));
+  char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,charFy*WH));
+  cam.x=Math.max(0,Math.min(WW-VW,camFx*WW));
+  cam.y=Math.max(0,Math.min(WH-VH,camFy*WH));
+  document.getElementById('cnt').textContent=collected;
 }
 
 function startGame(){
@@ -598,7 +617,7 @@ function startGame(){
 }
 
 document.getElementById('btn-play').addEventListener('click',startGame);
-window.addEventListener('resize',()=>{resize();startGame();});
+window.addEventListener('resize',resize);
 
 resize();
 startGame();
