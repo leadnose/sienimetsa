@@ -737,12 +737,11 @@ function update(dt){
   if(dx!==0) char.facing=dx>0?1:-1;
   const nx=char.x+dx*SPEED*dt, ny=char.y+dy*SPEED*dt;
   if(!blocked(nx,ny)){
-    char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,nx));
-    char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,ny));
-  } else if(!blocked(nx,char.y)){
-    char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,nx));
-  } else if(!blocked(char.x,ny)){
-    char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,ny));
+    char.x=nx;
+    char.y=ny;
+  } else {
+    if(!blocked(nx,char.y)) char.x=nx;
+    if(!blocked(char.x,ny)) char.y=ny;
   }
   char.vx=dx*SPEED; char.vy=dy*SPEED;
   easeCamera(dt);
@@ -768,6 +767,12 @@ function showWin(){
 
 // ── Resize & init ─────────────────────────────────────────────
 function resize(){
+  const hadPreviousWorld=Boolean(WW&&WH&&MUSHROOMS.length>0);
+  const collectedState=hadPreviousWorld?MUSHROOMS.map(m=>m.collected):null;
+  const charFx=hadPreviousWorld?char.x/WW:.30;
+  const charFy=hadPreviousWorld?char.y/WH:.35;
+  const camFx=hadPreviousWorld?cam.x/WW:0;
+  const camFy=hadPreviousWorld?cam.y/WH:0;
   VW=canvas.width=window.innerWidth;
   VH=canvas.height=window.innerHeight;
   WW=VW*7; WH=VH*7;
@@ -779,6 +784,14 @@ function resize(){
   ctx.imageSmoothingEnabled=false;
   setTreeSize();
   buildWorld();
+  if(collectedState) {
+    MUSHROOMS.forEach((m,i)=>m.collected=Boolean(collectedState[i]));
+  }
+  char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,charFx*WW));
+  char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,charFy*WH));
+  cam.x=Math.max(0,Math.min(WW-VW,camFx*WW));
+  cam.y=Math.max(0,Math.min(WH-VH,camFy*WH));
+  document.getElementById('cnt').textContent=collected;
 }
 
 function startGame(){
@@ -792,7 +805,7 @@ function startGame(){
 }
 
 document.getElementById('btn-play').addEventListener('click',startGame);
-window.addEventListener('resize',()=>{resize();startGame();});
+window.addEventListener('resize',resize);
 
 resize();
 startGame();
