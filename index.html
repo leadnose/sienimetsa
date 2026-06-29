@@ -131,7 +131,7 @@ const P = {
 // ── Map selection (URL: ?map=1..100) ─────────────────────────
 const mapNum = (() => {
   const n = parseInt(new URLSearchParams(location.search).get('map') ?? '');
-  return Number.isInteger(n) && n >= 1 && n <= 100 ? n : 1;
+  return Number.isInteger(n) && n >= 1 && n <= 10 ? n : 1;
 })();
 
 // ── World data (populated by generateWorld) ───────────────────
