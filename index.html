@@ -192,6 +192,7 @@ function start() {
   collected = 0;
   document.getElementById('cnt').textContent = '0';
   document.getElementById('tot').textContent = SHROOMS.length;
+  document.getElementById('btn-play').blur();
   document.getElementById('win').classList.remove('show');
 
   const dl = document.getElementById('dl');
@@ -255,7 +256,9 @@ function showWin() {
 }
 
 function confetti() {
+  const win = document.getElementById('win');
   for (let i = 0; i < 80; i++) setTimeout(() => {
+    if (!win.classList.contains('show')) return;
     const el = document.createElement('div');
     el.className = 'cft';
     el.style.left = Math.random()*100+'vw';
