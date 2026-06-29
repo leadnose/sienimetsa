@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sienimetsa 🍄</title>
+<style>
+*, *::before, *::after {
+  margin: 0; padding: 0; box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none; -webkit-user-select: none;
+}
+html, body { width: 100%; height: 100%; overflow: hidden; }
+
+#game {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(to bottom,
+    #4fc3f7 0%,
+    #81d4fa 36%,
+    #c5e8a0 43%,
+    #66bb6a 52%,
+    #388e3c 100%
+  );
+}
+
+#sun {
+  position: absolute; top: 4%; right: 7%;
+  font-size: clamp(40px, 8vw, 70px);
+  pointer-events: none; line-height: 1;
+  animation: sunFloat 5s ease-in-out infinite;
+}
+@keyframes sunFloat {
+  0%,100% { transform: rotate(-5deg); }
+  50%     { transform: translateY(-5px) rotate(5deg); }
+}
+
+.decor {
+  position: absolute; pointer-events: none;
+  line-height: 1; font-size: clamp(26px, 5vmin, 52px);
+}
+
+#basket {
+  position: absolute; top: 14px; left: 14px; z-index: 100;
+  background: rgba(255,248,220,.93); border: 3px solid #c88a00;
+  border-radius: 18px; padding: 8px 18px;
+  font-size: clamp(18px, 4.5vw, 32px);
+  font-weight: 700; color: #5d3200;
+  display: flex; align-items: center; gap: 6px;
+  box-shadow: 0 3px 10px rgba(0,0,0,.22);
+}
+
+.mushroom {
+  position: absolute;
+  font-size: clamp(72px, 18vw, 92px);
+  cursor: pointer; touch-action: none; line-height: 1;
+  transform-origin: center bottom; z-index: 20;
+  filter: drop-shadow(2px 4px 3px rgba(0,0,0,.32));
+  animation:
+    mAppear .4s cubic-bezier(.175,.885,.32,1.275) var(--d,0s) backwards,
+    mWiggle 5s ease-in-out calc(var(--d,0s) + .8s) infinite;
+}
+.mushroom.out {
+  animation: mCollect .45s ease-in forwards !important;
+  pointer-events: none;
+}
+@keyframes mAppear {
+  from { transform: scale(0) translateY(18px); opacity: 0; }
+  to   { transform: scale(1) translateY(0);    opacity: 1; }
+}
+@keyframes mWiggle {
+  0%,80%,100% { transform: scale(1)    rotate(0deg); }
+  83%         { transform: scale(1.06) rotate(-7deg); }
+  86%         { transform: scale(1.06) rotate(7deg); }
+  89%         { transform: scale(1.05) rotate(-4deg); }
+  92%         { transform: scale(1.02) rotate(0deg); }
+}
+@keyframes mCollect {
+  0%  { transform: scale(1)   rotate(0deg);    opacity: 1; }
+  35% { transform: scale(1.7) rotate(-12deg);  opacity: 1; }
+  100%{ transform: scale(0)   rotate(25deg) translateY(-60px); opacity: 0; }
+}
+
+.spark {
+  position: fixed; pointer-events: none; z-index: 200;
+  line-height: 1; font-size: clamp(18px, 3vw, 30px);
+  animation: sparkOut .65s ease-out forwards;
+}
+@keyframes sparkOut {
+  from { transform: translate(0,0) scale(.3); opacity: 1; }
+  to   { transform: translate(var(--dx),var(--dy)) scale(1.1); opacity: 0; }
+}
+
+#win {
+  position: fixed; inset: 0; z-index: 300;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: clamp(12px, 3vh, 28px);
+  background: rgba(255,220,40,.94);
+  backdrop-filter: blur(4px);
+  text-align: center;
+}
+#win.show {
+  display: flex;
+  animation: winPop .6s cubic-bezier(.175,.885,.32,1.275);
+}
+@keyframes winPop {
+  from { transform: scale(.4); opacity: 0; }
+  to   { transform: scale(1);  opacity: 1; }
+}
+.win-big { font-size: clamp(50px, 13vw, 100px); }
+.win-msg { font-size: clamp(20px, 5vw, 44px); color: #5d2600; font-weight: 700; }
+#btn-play {
+  font-size: clamp(18px, 4vw, 32px);
+  padding: clamp(12px,2.5vh,20px) clamp(28px,6vw,56px);
+  background: #e85d04; color: #fff; border: none;
+  border-radius: 50px; cursor: pointer;
+  box-shadow: 0 6px 0 #9d2700;
+  transition: transform .1s, box-shadow .1s;
+  touch-action: manipulation;
+}
+#btn-play:active { transform: translateY(4px); box-shadow: 0 2px 0 #9d2700; }
+
+.cft {
+  position: fixed; top: -16px; pointer-events: none; z-index: 290;
+  border-radius: 2px;
+  animation: cftFall linear forwards;
+}
+@keyframes cftFall {
+  from { transform: translateY(0) rotate(0deg); opacity: 1; }
+  to   { transform: translateY(108vh) rotate(720deg); opacity: .2; }
+}
+</style>
+</head>
+<body>
+<div id="game">
+  <div id="sun">☀️</div>
+  <div id="dl"></div>
+  <div id="ml"></div>
+  <div id="basket">🧺 <span id="cnt">0</span> / <span id="tot"></span></div>
+  <div id="win" role="dialog" aria-modal="true" aria-labelledby="win-msg">
+    <div class="win-big">🎉🍄🎉</div>
+    <div class="win-msg" id="win-msg">Löysit kaikki sienet!</div>
+    <div class="win-big" style="font-size:clamp(40px,10vw,78px)">⭐⭐⭐</div>
+    <button id="btn-play">🔄 Uudelleen!</button>
+  </div>
+</div>
+<script>
+'use strict';
+
+const SHROOMS = [
+  [6,54],[19,67],[35,52],[51,64],[65,55],[78,68],[88,52],[43,75]
+];
+const DECOR = [
+  ['☁️',12,8],['☁️',42,13],['☁️',70,7],
+  ['🌲',1,36],['🌳',14,38],['🌲',28,34],
+  ['🌳',57,37],['🌲',70,34],['🌳',84,38],['🌲',94,36],
+  ['🌸',4,76],['🌼',31,81],['🌸',59,77],['🌻',75,80],['🌼',92,74],
+  ['🦋',38,43],['🐝',62,46],
+];
+const SPARKS  = ['⭐','✨','💫','🌟','❤️'];
+const CFTCOL  = ['#ff595e','#ffca3a','#8ac926','#1982c4','#6a4c93','#ff924c','#fff'];
+
+let audioCtx, collected;
+
+function ac() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function beep(freq, dur, vol) {
+  try {
+    const ctx=ac(), o=ctx.createOscillator(), g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type='sine'; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001, ctx.currentTime+dur);
+    o.start(ctx.currentTime); o.stop(ctx.currentTime+dur);
+  } catch(e) {}
+}
+function playCollect(i) {
+  beep([523,587,659,698,784,880][i%6], .3, .25);
+}
+function playWin() {
+  [523,659,784,1047,784,1047,1319].forEach((f,i) =>
+    setTimeout(() => beep(f,.35,.22), i*150));
+}
+
+function start() {
+  collected = 0;
+  document.getElementById('cnt').textContent = '0';
+  document.getElementById('tot').textContent = SHROOMS.length;
+  document.getElementById('btn-play').blur();
+  document.getElementById('win').classList.remove('show');
+
+  const dl = document.getElementById('dl');
+  dl.innerHTML = '';
+  DECOR.forEach(([e,x,y]) => {
+    const el = document.createElement('div');
+    el.className = 'decor'; el.textContent = e;
+    el.style.left = x+'%'; el.style.top = y+'%';
+    dl.appendChild(el);
+  });
+
+  const ml = document.getElementById('ml');
+  ml.innerHTML = '';
+  SHROOMS.forEach(([x,y], i) => {
+    const el = document.createElement('div');
+    el.className = 'mushroom'; el.textContent = '🍄';
+    el.style.left = x+'%'; el.style.top = y+'%';
+    el.style.setProperty('--d', (i*.1)+'s');
+    el.addEventListener('pointerdown', ev => {
+      ev.preventDefault();
+      if (el.classList.contains('out')) return;
+      pick(el, i);
+    });
+    ml.appendChild(el);
+  });
+}
+
+function pick(el, i) {
+  el.classList.add('out');
+  const r = el.getBoundingClientRect();
+  sparks(r.left + r.width/2, r.top + r.height/2);
+  playCollect(i);
+  collected++;
+  document.getElementById('cnt').textContent = collected;
+  setTimeout(() => {
+    el.style.display = 'none';
+    if (collected >= SHROOMS.length) setTimeout(showWin, 350);
+  }, 450);
+}
+
+function sparks(cx, cy) {
+  for (let i = 0; i < 7; i++) {
+    const el = document.createElement('div');
+    el.className = 'spark';
+    el.textContent = SPARKS[Math.floor(Math.random()*SPARKS.length)];
+    el.style.left = cx+'px'; el.style.top = cy+'px';
+    const a = (i/7)*Math.PI*2 + Math.random()*.4;
+    const d = 55 + Math.random()*45;
+    el.style.setProperty('--dx', Math.cos(a)*d+'px');
+    el.style.setProperty('--dy', Math.sin(a)*d+'px');
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 700);
+  }
+}
+
+function showWin() {
+  document.getElementById('win').classList.add('show');
+  document.getElementById('btn-play').focus();
+  playWin();
+  confetti();
+}
+
+function confetti() {
+  const win = document.getElementById('win');
+  for (let i = 0; i < 80; i++) setTimeout(() => {
+    if (!win.classList.contains('show')) return;
+    const el = document.createElement('div');
+    el.className = 'cft';
+    el.style.left = Math.random()*100+'vw';
+    el.style.width  = (8+Math.random()*9)+'px';
+    el.style.height = (8+Math.random()*9)+'px';
+    el.style.background = CFTCOL[Math.floor(Math.random()*CFTCOL.length)];
+    const dur = 1.8 + Math.random()*2;
+    el.style.animationDuration = dur+'s';
+    document.getElementById('game').appendChild(el);
+    setTimeout(() => el.remove(), (dur+.1)*1000);
+  }, i*45);
+}
+
+document.getElementById('btn-play').addEventListener('click', start);
+start();
+</script>
+</body>
+</html>
