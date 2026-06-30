@@ -261,7 +261,7 @@ function buildWorld() {
     for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
       const arr=placeGrid.get((gx+ox)+','+(gy+oy)); if(!arr) continue;
       for(const o of arr)
-        if(Math.hypot(wx-o.wx,wy-o.wy)<(sz+o.sz)*0.45) return false;
+        if(Math.hypot(wx-o.wx,wy-o.wy)<(sz+o.sz)*0.30) return false;
     }
     const k=gx+','+gy; let arr=placeGrid.get(k); if(!arr){arr=[];placeGrid.set(k,arr);}
     arr.push({wx,wy,sz});
