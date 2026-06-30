@@ -127,9 +127,24 @@ const mapNum = (() => {
   return Number.isInteger(n) && n >= 1 && n <= 10 ? n : 1;
 })();
 
+// ── Named constants ───────────────────────────────────────────
+const T_GRASS=0, T_SAND=1, T_MARSH=2, T_ROCK=3, T_GRAVEL=4;
+const TR_DECIDUOUS=0, TR_PINE=1, TR_SPRUCE=2, TR_FIR=3, TR_SCOTS=4;
+const U_BILBERRY=0, U_LINGONBERRY=1, U_FERN=2, U_MOSS=3, U_GRASS_TUFT=4;
+const WORLD_SCALE=7; // world is WORLD_SCALE × viewport size
+
 // ── World data ────────────────────────────────────────────────
-let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], SHROOM_POS=[];
-let TREES=[], SHRUBS=[], FLOWERS=[], PATCHES=[], MUSHROOMS=[], COLLIDERS=[];
+let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], SHROOM_POS=[], TERRAIN_ZONES=[];
+let TREES=[], SHRUBS=[], FLOWERS=[], PATCHES=[], MUSHROOMS=[], COLLIDERS=[], UNDERSTORY=[];
+
+function terrainAt(x,y){
+  let bestInf=0, best=T_GRASS;
+  for(const z of TERRAIN_ZONES){
+    const d2=((x-z.x)/z.rx)**2+((y-z.y)/z.ry)**2;
+    if(d2<1){const inf=1-Math.sqrt(d2);if(inf>bestInf){bestInf=inf;best=z.t;}}
+  }
+  return best;
+}
 
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
 
@@ -183,6 +198,20 @@ function generateWorld(seed){
     const inM=MOUNT_DEF.some(m=>Math.hypot(mx-m.x,my-m.y)<m.s*.09);
     if(!inW&&!inM) SHROOM_POS.push([mx,my]);
   }
+  // Terrain zones: 1=sand 2=marsh 3=rock 4=gravel
+  TERRAIN_ZONES = [];
+  const nTZ = 18 + Math.floor(r()*10);
+  const tzPool = [T_SAND,T_SAND,T_MARSH,T_MARSH,T_ROCK,T_ROCK,T_GRAVEL,T_GRAVEL];
+  for(let tries=0; TERRAIN_ZONES.length<nTZ && tries<300; tries++){
+    const tx=0.04+r()*.92, ty=0.04+r()*.92;
+    const inW=WATER_DEF.some(w=>Math.hypot(tx-w.x,ty-w.y)<Math.max(w.rx,w.ry)*1.8);
+    if(inW) continue;
+    TERRAIN_ZONES.push({
+      x:tx, y:ty,
+      rx:0.14+r()*.24, ry:0.10+r()*.18,
+      t:tzPool[(r()*tzPool.length)|0]
+    });
+  }
 }
 
 function buildWorld() {
@@ -192,16 +221,51 @@ function buildWorld() {
   const mCX = MOUNT_DEF.reduce((s,m)=>s+m.x,0)/MOUNT_DEF.length;
   const mCY = MOUNT_DEF.reduce((s,m)=>s+m.y,0)/MOUNT_DEF.length;
   TREES = [];
-  for(let i=0;i<65;i++) TREES.push({x:r()*.42,y:.50+r()*.48,t:0,m:0.8+r()*.5});
-  for(let i=0;i<30;i++) TREES.push({x:clamp(mCX-.15+r()*.30,0,1),y:r()*.55,t:1,m:0.8+r()*.4});
-  for(let i=0;i<18;i++) TREES.push({x:clamp(mCX+r()*.40,0,1),y:clamp(mCY+r()*.35,0,.55),t:1,m:0.7+r()*.5});
-  for(let i=0;i<50;i++) TREES.push({x:r(),y:r(),t:r()>.45?1:0,m:0.7+r()*.6});
-  for(let i=0;i<24;i++) TREES.push({x:r()*.44,y:r()*.58,t:2,m:0.7+r()*1.1});
-  for(let i=0;i<18;i++) TREES.push({x:clamp(mCX-.1+r()*.45,0,1),y:r()*.48,t:2,m:0.8+r()*1.0});
-  for(let i=0;i<14;i++) TREES.push({x:r(),y:r(),t:2,m:0.5+r()*1.2});
-  for(let i=0;i<22;i++) TREES.push({x:r(),y:r(),t:3,m:0.7+r()*.8});
-  for(let i=0;i<12;i++) TREES.push({x:r()*.38,y:.52+r()*.42,t:3,m:0.9+r()*.9});
-  for(let i=0;i<15;i++) TREES.push({x:r(),y:r(),t:4,m:0.9+r()*.9});
+  for(let i=0;i<600;i++) TREES.push({x:r()*.42,y:.50+r()*.48,t:TR_DECIDUOUS,m:0.8+r()*.5});
+  for(let i=0;i<300;i++) TREES.push({x:clamp(mCX-.15+r()*.30,0,1),y:r()*.55,t:TR_PINE,m:0.8+r()*.4});
+  for(let i=0;i<180;i++) TREES.push({x:clamp(mCX+r()*.40,0,1),y:clamp(mCY+r()*.35,0,.55),t:TR_PINE,m:0.7+r()*.5});
+  for(let i=0;i<450;i++) TREES.push({x:r(),y:r(),t:r()>.45?TR_PINE:TR_DECIDUOUS,m:0.7+r()*.6});
+  for(let i=0;i<220;i++) TREES.push({x:r()*.44,y:r()*.58,t:TR_SPRUCE,m:0.7+r()*1.1});
+  for(let i=0;i<180;i++) TREES.push({x:clamp(mCX-.1+r()*.45,0,1),y:r()*.48,t:TR_SPRUCE,m:0.8+r()*1.0});
+  for(let i=0;i<130;i++) TREES.push({x:r(),y:r(),t:TR_SPRUCE,m:0.5+r()*1.2});
+  for(let i=0;i<200;i++) TREES.push({x:r(),y:r(),t:TR_FIR,m:0.7+r()*.8});
+  for(let i=0;i<110;i++) TREES.push({x:r()*.38,y:.52+r()*.42,t:TR_FIR,m:0.9+r()*.9});
+  for(let i=0;i<140;i++) TREES.push({x:r(),y:r(),t:TR_SCOTS,m:0.9+r()*.9});
+  // Remap tree species and thin density based on terrain
+  const TERRAIN_TREE_CFG={
+    [T_SAND]:  {keep:0.35,pool:[TR_SCOTS,TR_SCOTS,TR_SCOTS,TR_SPRUCE]},
+    [T_MARSH]: {keep:0.55,pool:[TR_DECIDUOUS,TR_DECIDUOUS,TR_DECIDUOUS,TR_PINE,TR_PINE,TR_SPRUCE]},
+    [T_ROCK]:  {keep:0.08,pool:[TR_SCOTS]},
+    [T_GRAVEL]:{keep:0.30,pool:[TR_SCOTS,TR_SCOTS,TR_PINE]},
+  };
+  TREES=TREES.filter(tr=>{
+    const tz=terrainAt(tr.x,tr.y);
+    const cfg=TERRAIN_TREE_CFG[tz];
+    if(!cfg) return true; // T_GRASS: keep as-is
+    if(r()>cfg.keep) return false;
+    tr.t=cfg.pool[(r()*cfg.pool.length)|0];
+    return true;
+  });
+  UNDERSTORY = [];
+  const ur=mkRng(mapNum*2003+13);
+  const TZ_CFG={
+    [T_GRASS]: {min:12,rnd:10,pool:[U_BILBERRY,U_BILBERRY,U_LINGONBERRY,U_LINGONBERRY,U_FERN,U_FERN,U_MOSS,U_MOSS,U_GRASS_TUFT,U_GRASS_TUFT]},
+    [T_SAND]:  {min:1, rnd:3, pool:[U_GRASS_TUFT,U_GRASS_TUFT,U_GRASS_TUFT,U_MOSS,U_MOSS,U_LINGONBERRY]},
+    [T_MARSH]: {min:22,rnd:13,pool:[U_MOSS,U_MOSS,U_MOSS,U_MOSS,U_FERN,U_FERN,U_FERN,U_BILBERRY,U_BILBERRY,U_GRASS_TUFT]},
+    [T_ROCK]:  {min:0, rnd:2, pool:[U_MOSS]},
+    [T_GRAVEL]:{min:3, rnd:5, pool:[U_LINGONBERRY,U_LINGONBERRY,U_LINGONBERRY,U_GRASS_TUFT,U_GRASS_TUFT,U_GRASS_TUFT,U_MOSS,U_MOSS]},
+  };
+  TREES.forEach(tr=>{
+    const cfg=TZ_CFG[terrainAt(tr.x,tr.y)];
+    const count=cfg.min+(ur()*cfg.rnd)|0;
+    for(let j=0;j<count;j++){
+      const a=ur()*Math.PI*2, d=0.003+ur()*.022;
+      const ux=clamp(tr.x+Math.cos(a)*d,0.01,.99);
+      const uy=clamp(tr.y+Math.sin(a)*d,0.01,.99);
+      const inW=WATER_DEF.some(w=>Math.hypot(ux-w.x,uy-w.y)<Math.max(w.rx,w.ry)*1.1);
+      if(!inW) UNDERSTORY.push({x:ux,y:uy,t:cfg.pool[(ur()*cfg.pool.length)|0]});
+    }
+  });
   SHRUBS = [];
   for(let i=0;i<110;i++) SHRUBS.push({x:r(),y:r(),m:0.5+r()*.7,berries:r()>.65});
   FLOWERS = [];
@@ -665,10 +729,10 @@ function getTreeSpr(type,r){
   const rr=Math.max(4,Math.round(r/4)*4);
   const key=type+'_'+rr;
   if(!SP[key]) SP[key]=
-    type===0?makeDecidSpr(rr):
-    type===1?makePineSpr(rr):
-    type===2?makeSpruSpr(rr):
-    type===3?makeFirSpr(rr):
+    type===TR_DECIDUOUS?makeDecidSpr(rr):
+    type===TR_PINE     ?makePineSpr(rr):
+    type===TR_SPRUCE   ?makeSpruSpr(rr):
+    type===TR_FIR      ?makeFirSpr(rr):
              makeScotsSpr(rr);
   return SP[key];
 }
@@ -687,31 +751,62 @@ function drawGround(){
   const id=pixCtx.createImageData(pixW,pixH);
   const buf=id.data;
   const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
-  const gPal=[
-    [38,68,16],[47,80,20],[56,90,22],[66,104,28],[76,116,34],[88,130,40]
+  // Precompute for zone lookup in normalized world coords
+  const wxBase=cam.x/WW, wyBase=cam.y/WH;
+  const wxStep=PS/WW,    wyStep=PS/WH;
+
+  // indexed by T_GRASS / T_SAND / T_MARSH / T_ROCK / T_GRAVEL
+  const TPAL=[
+    /* T_GRASS  */ {pal:[[38,68,16],[47,80,20],[56,90,22],[66,104,28],[76,116,34],[88,130,40]],
+                   sc:[[74,62,44],[90,76,56],[62,52,36]], scr:10},
+    /* T_SAND   */ {pal:[[168,144,76],[180,156,88],[192,167,100],[204,178,112],[218,192,124]],
+                   sc:[[144,120,60],[158,132,70],[132,108,50]], scr:8},
+    /* T_MARSH  */ {pal:[[28,46,14],[34,54,16],[40,62,18],[46,70,22],[36,52,28]],
+                   sc:[[44,72,88],[38,60,76],[52,84,100]], scr:22},
+    /* T_ROCK   */ {pal:[[82,78,70],[94,90,80],[108,102,90],[120,114,100],[132,126,112]],
+                   sc:[[56,52,46],[48,44,40],[64,60,54]], scr:34},
+    /* T_GRAVEL */ {pal:[[106,94,70],[118,106,80],[130,116,88],[142,126,96],[154,136,104]],
+                   sc:[[86,74,54],[94,82,60],[78,66,48]], scr:20},
   ];
-  const sPal=[[74,62,44],[90,76,56],[62,52,36]]; // stone shades
 
   for(let py=0;py<pixH;py++){
+    const wyf=wyBase+py*wyStep;
     for(let px=0;px<pixW;px++){
       const wx=cpx+px, wy=cpy+py;
+      const wxf=wxBase+px*wxStep;
       const h1=((wx*17)^(wy*31))&0xff;
       const h2=((wx*41)^(wy*19))&0xff;
       const h3=((wx*7 )^(wy*53))&0xff;
       const p=4*(py*pixW+px);
+      const bv=b4(wx,wy);
 
-      // Stone scatter: ~1.2% of pixels
-      if(((h1^h2^h3)&0x7f)<10){
-        const sc=sPal[(h3>>5)%3];
+      // Find dominant terrain zone
+      let bestInf=0, bestType=T_GRASS;
+      for(let zi=0;zi<TERRAIN_ZONES.length;zi++){
+        const z=TERRAIN_ZONES[zi];
+        const ddx=(wxf-z.x)/z.rx, ddy=(wyf-z.y)/z.ry;
+        const d2=ddx*ddx+ddy*ddy;
+        if(d2>=1) continue;
+        const inf=1-Math.sqrt(d2);
+        if(inf>bestInf){bestInf=inf;bestType=z.t;}
+      }
+      // Bayer-dither transition between grass and zone
+      const tp=bv<bestInf*16?bestType:0;
+      const td=TPAL[tp];
+
+      // Scatter pixels (stones / puddles / cracks / pebbles)
+      if((h1^h2^h3)<td.scr){
+        const sc=td.sc[h3%td.sc.length];
         buf[p]=sc[0];buf[p+1]=sc[1];buf[p+2]=sc[2];buf[p+3]=255;
         continue;
       }
-      // Grass shade via Bayer-dithered noise
-      const noise=(h1*140+h2*80+h3*35)>>8;  // 0-199
-      const fi=noise*(gPal.length-1)/199;
-      const i0=Math.min(gPal.length-2,fi|0);
-      const pick=(fi-i0)*16>b4(px+cpx,py+cpy)?i0+1:i0;
-      const g=gPal[pick];
+      // Base shade via Bayer-dithered noise
+      const noise=(h1*140+h2*80+h3*35)>>8;
+      const n=td.pal.length;
+      const fi=noise*(n-1)/199;
+      const i0=Math.min(n-2,fi|0);
+      const pick=(fi-i0)*16>bv?i0+1:i0;
+      const g=td.pal[pick];
       buf[p]=g[0];buf[p+1]=g[1];buf[p+2]=g[2];buf[p+3]=255;
     }
   }
@@ -937,27 +1032,27 @@ function drawHill(m){
 function drawRoundTree(wx,wy,sz){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r*2<0||x-r*2>pixW||y+r<0||y-r*4>pixH) return;
-  const s=getTreeSpr(0,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_DECIDUOUS,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
 function drawPineTree(wx,wy,sz){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r<0||x-r>pixW||y<0||y-r*4>pixH) return;
-  const s=getTreeSpr(1,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_PINE,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
 function drawSpruce(wx,wy,sz){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz*.72/PS)|0);
   if(x+r+2<0||x-r-2>pixW||y<0||y-r*5>pixH) return;
-  const s=getTreeSpr(2,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_SPRUCE,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
 function drawBroadFir(wx,wy,sz){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz*1.10/PS)|0);
   if(x+r+3<0||x-r-3>pixW||y<0||y-r*3>pixH) return;
-  const s=getTreeSpr(3,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_FIR,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
 function drawScotsPine(wx,wy,sz){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r*2<0||x-r*2>pixW||y<0||y-r*5>pixH) return;
-  const s=getTreeSpr(4,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_SCOTS,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
 
 // ── Shrub ─────────────────────────────────────────────────────
@@ -1126,10 +1221,47 @@ function drawSnufkin(wx,wy,t,moving){
 let treeSz=0;
 function setTreeSize(){ treeSz=Math.min(VW,VH)*.065; }
 
+function drawPlant(x,y,t){
+  switch(t){
+    case U_BILBERRY:
+      pr(x,y,1,2,'#284e12');
+      pr(x-2,y-1,2,1,'#2a5010'); pr(x+1,y-1,2,1,'#2a5010');
+      pr(x-1,y-2,3,1,'#2a5010');
+      pr(x,y-3,1,1,'#1a3890'); pr(x-1,y-3,1,1,'#3050a0');
+      break;
+    case U_LINGONBERRY:
+      pr(x,y,1,2,'#2a4a12');
+      pr(x-2,y-1,2,1,'#304e14'); pr(x+1,y-1,2,1,'#304e14');
+      pr(x-1,y-2,3,1,'#304e14');
+      pr(x,y-3,1,1,'#b81818'); pr(x-1,y-3,1,1,'#e02828');
+      break;
+    case U_FERN:
+      pr(x,y,1,5,'#1e4010');
+      pr(x-2,y-1,2,1,'#264810'); pr(x+1,y-1,2,1,'#264810');
+      pr(x-3,y-2,3,1,'#264810'); pr(x+1,y-2,3,1,'#264810');
+      pr(x-2,y-3,2,1,'#264810'); pr(x+1,y-3,2,1,'#264810');
+      pr(x-1,y-4,2,1,'#264810');
+      break;
+    case U_MOSS:
+      pr(x-2,y,5,1,'#1a3c0a');
+      pr(x-3,y-1,7,1,'#1e4410');
+      pr(x-2,y-2,5,1,'#1a3c0a');
+      break;
+    case U_GRASS_TUFT:
+      pr(x-1,y,1,3,'#3a6020'); pr(x,y-1,1,4,'#486828'); pr(x+1,y,1,3,'#3a6020');
+      pr(x-1,y-3,1,1,'#5a8030'); pr(x+1,y-3,1,1,'#5a8030');
+      break;
+  }
+}
+
 function drawVegetation(){
   const pad=Math.min(WW,WH)*.15;
   const x0=cam.x-pad,x1=cam.x+VW+pad,y0=cam.y-pad,y1=cam.y+VH+pad;
   const items=[];
+  UNDERSTORY.forEach(u=>{
+    const ux=u.x*WW,uy=u.y*WH;
+    if(ux>x0&&ux<x1&&uy>y0&&uy<y1) items.push({wy:uy,fn:()=>drawPlant(wpx(ux),wpy(uy),u.t)});
+  });
   SHRUBS.forEach(sh=>{
     const sx=sh.x*WW,sy=sh.y*WH;
     if(sx>x0&&sx<x1&&sy>y0&&sy<y1) items.push({wy:sy,fn:()=>drawShrub(sh)});
@@ -1139,11 +1271,11 @@ function drawVegetation(){
     if(tx>x0&&tx<x1&&ty>y0&&ty<y1){
       const sz=treeSz*tr.m;
       items.push({wy:ty,fn:
-        tr.t===0?()=>drawRoundTree(tx,ty,sz):
-        tr.t===1?()=>drawPineTree(tx,ty,sz):
-        tr.t===2?()=>drawSpruce(tx,ty,sz):
-        tr.t===3?()=>drawBroadFir(tx,ty,sz):
-                 ()=>drawScotsPine(tx,ty,sz)});
+        tr.t===TR_DECIDUOUS?()=>drawRoundTree(tx,ty,sz):
+        tr.t===TR_PINE     ?()=>drawPineTree(tx,ty,sz):
+        tr.t===TR_SPRUCE   ?()=>drawSpruce(tx,ty,sz):
+        tr.t===TR_FIR      ?()=>drawBroadFir(tx,ty,sz):
+                            ()=>drawScotsPine(tx,ty,sz)});
     }
   });
   items.sort((a,b)=>a.wy-b.wy);
@@ -1154,6 +1286,11 @@ function drawVegetation(){
 function renderMinimap(){
   const mw=mmCv.width,mh=mmCv.height;
   mmCtx.fillStyle=P.mm_g; mmCtx.fillRect(0,0,mw,mh);
+  const tzCol={[T_SAND]:'#c8a84a',[T_MARSH]:'#3a5820',[T_ROCK]:'#787060',[T_GRAVEL]:'#8a7850'};
+  TERRAIN_ZONES.forEach(z=>{
+    mmCtx.fillStyle=tzCol[z.t];
+    mmCtx.beginPath();mmCtx.ellipse(z.x*mw,z.y*mh,z.rx*mw,z.ry*mh,0,0,Math.PI*2);mmCtx.fill();
+  });
   RIVERS.forEach(pts=>{
     mmCtx.strokeStyle=P.mm_w;mmCtx.lineWidth=2;
     mmCtx.beginPath();pts.forEach((p,i)=>i===0?mmCtx.moveTo(p.x*mw,p.y*mh):mmCtx.lineTo(p.x*mw,p.y*mh));mmCtx.stroke();
@@ -1200,7 +1337,7 @@ function update(dt){
   gameTime+=dt;
   const {dx,dy}=inputDir();
   if(dx!==0) char.facing=dx>0?1:-1;
-  const nx=char.x+dx*SPEED*dt, ny=char.y+dy*SPEED*dt;
+  const nx=clamp(char.x+dx*SPEED*dt,CHAR_R,WW-CHAR_R), ny=clamp(char.y+dy*SPEED*dt,CHAR_R,WH-CHAR_R);
   if(!blocked(nx,ny)){ char.x=nx; char.y=ny; }
   else { if(!blocked(nx,char.y)) char.x=nx; if(!blocked(char.x,ny)) char.y=ny; }
   char.vx=dx*SPEED; char.vy=dy*SPEED;
@@ -1233,7 +1370,7 @@ function resize(){
   const camFx=hadWorld?cam.x/WW:0,    camFy=hadWorld?cam.y/WH:0;
   VW=canvas.width=window.innerWidth;
   VH=canvas.height=window.innerHeight;
-  WW=VW*7; WH=VH*7;
+  WW=VW*WORLD_SCALE; WH=VH*WORLD_SCALE;
   mmCv.width=MM_W; mmCv.height=Math.round(MM_W*VH/VW);
   PS=Math.max(1,Math.round(VW/640));
   pixW=Math.ceil(VW/PS); pixH=Math.ceil(VH/PS);
