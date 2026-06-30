@@ -1275,100 +1275,99 @@ function drawMushroom(m){
   });
 }
 
-// ── Snufkin ───────────────────────────────────────────────────
-// AoE2-style pixel character: every element has lit/shadow faces,
-// dark 1px outline, 4-frame walk animation with arm swing.
-function drawSnufkin(wx,wy,t,moving){
+// ── Metsätonttu (forest gnome) ────────────────────────────────
+// AoE2-style pixel character: lit/shadow faces on every element, tall
+// drooping red cap (tip leans toward facing), huge shaded white beard,
+// round red nose, woolen tunic, stubby boots. 4-frame walk with swinging
+// mittens; the white cap-pom sways gently when idle.
+const GN={
+  capL:'#e23030', cap:'#c01c1c', capD:'#7c0e0e',     // pointed cap
+  beardL:'#f4f1e6', beard:'#ddd8c6', beardD:'#b3ad97',// beard
+  skin:'#e3b083', nose:'#d2705e', noseL:'#e8907e',    // face / nose
+  tunic:'#46603a', tunicD:'#2e4226',                  // woolen tunic
+  belt:'#3a2410', boot:'#3a2812', bootD:'#241808',    // belt / boots
+  pomS:'#a8a290',
+};
+function drawGnome(wx,wy,t,moving){
   const cx=wpx(wx), cy=wpy(wy);
   const f=char.facing;  // 1=right, -1=left
   const s=Math.max(1,Math.min(2,(Math.min(VW,VH)*.006/PS)|0));
   const frame=moving?Math.floor(t*7)%4:0;
   const bob=(frame===1||frame===3)?-1:0;
 
-  // sp: place rect at (dx,dy) units from feet centre, flipping for facing
+  // sp: place rect at (dx,dy) units from feet centre, flipping for facing.
+  // dx is the left edge in facing-right space; positive dx leans toward facing.
   function sp(dx,dy,w,h,c){
     const x0=f>0?cx+dx*s:cx-(dx+w)*s;
     pr(x0,(cy+dy*s)+bob,w*s,h*s,c);
   }
-  // spF: unflipped (hat/pipe always same side)
-  function spF(dx,dy,w,h,c){ pr(cx+dx*s,(cy+dy*s)+bob,w*s,h*s,c); }
 
-  // Ground shadow
+  // Ground shadow (wide & stout)
   const sh=Math.max(1,s>>1);
-  pr(cx-s*3,cy,s*7,sh,'#203808');
+  pr(cx-s*4,cy,s*8,sh,'#203808');
 
-  // Walk frames: legs alternate, arms swing opposite
-  const llY=frame===1?-2:frame===3?2:0;
-  const lrY=-llY;
-  const laY=frame===1?2:frame===3?-2:0;   // left arm
-  const raY=-laY;                           // right arm
+  // Walk: stubby feet alternate a lift; mittens swing opposite
+  const lf=frame===1?-1:0, rf=frame===3?-1:0;
+  const aw=frame===1?-1:frame===3?1:0;
 
-  // ── Legs ──
-  sp(-3,-6+llY, 2,6, P.coat);   // left leg body
-  sp(-2,-6+llY, 1,6, P.coatD);  // left leg shadow
-  sp(-3,   llY, 3,1, P.shoe);   // left shoe
-  sp( 1,-6+lrY, 2,6, P.coat);   // right leg
-  sp( 2,-6+lrY, 1,6, P.coatD);
-  sp( 1,   lrY, 3,1, P.shoe);
+  // ── Boots (peek beneath the beard) ──
+  sp(-3,-2+lf, 3,2, GN.boot);  sp(-3,-2+lf, 3,1, GN.bootD);
+  sp( 1,-2+rf, 3,2, GN.boot);  sp( 1,-2+rf, 3,1, GN.bootD);
 
-  // ── Cape (back side, behind body) ──
-  sp(-5,-12, 2,8, P.cape);
-  sp(-5,-12, 1,8, P.capeD);     // cape left-edge shadow
-  sp(-5, -5, 2,2, P.capeD);     // cape lower fold
+  // ── Woolen tunic (slightly stout) ──
+  sp(-3,-11, 7,9, GN.tunic);
+  sp( 2,-11, 2,9, GN.tunicD);   // right shadow face
+  sp(-3, -3, 7,1, GN.tunicD);   // hem shadow
+  sp(-3,-11, 1,9, GN.beardL);   // faint lit left edge
 
-  // ── Body / coat ──
-  sp(-2,-12, 5,6, P.coat);      // coat body
-  sp( 2,-12, 1,6, P.coatD);     // coat right shadow
-  sp(-2, -7, 5,1, P.coatD);     // coat bottom shadow
+  // Belt + brass buckle (sides peek past the beard)
+  sp(-3,-6, 7,1, GN.belt);
+  sp(-1,-7, 2,2, '#d4a010');
+  sp( 0,-7, 1,1, '#f0c030');
 
-  // Belt + buckle
-  sp(-2,-7, 5,1, P.belt);
-  sp(-1,-8, 2,2, '#d4a010');    // brass buckle
-  sp( 0,-8, 1,1, '#f0c030');    // buckle highlight
+  // ── Arms + mitten hands at the sides ──
+  sp(-4,-10, 2,4, GN.tunic);  sp(-4,-10, 1,4, GN.tunicD);
+  sp( 5,-10, 2,4, GN.tunic);  sp( 6,-10, 1,4, GN.tunicD);
+  sp(-4,-6+aw, 2,2, GN.cap);  sp(-4,-6+aw, 1,2, GN.capD);   // left mitten
+  sp( 5,-6-aw, 2,2, GN.cap);  sp( 6,-6-aw, 1,2, GN.capD);   // right mitten
 
-  // ── Arms ──
-  sp(-5,-11+laY, 2,4, P.cape);  // left arm (cape coloured)
-  sp(-5,-11+laY, 1,4, P.capeD);
-  sp( 3,-11+raY, 2,4, P.coat);  // right arm
-  sp( 4,-11+raY, 1,4, P.coatD);
+  // ── Face patch (only nose shows; eyes hidden under the cap) ──
+  sp(-2,-16, 4,3, GN.skin);
+  sp( 1,-16, 1,3, '#c8966a');  // cheek shadow
 
-  // ── Head ──
-  sp(-2,-16, 5,4, P.skin);      // face
-  sp( 2,-16, 1,4, P.skinD);     // face right shadow
-  sp(-2,-16, 1,1, P.skinD);     // left ear
-  sp(-1,-15, 1,1, P.outline);   // left eye
-  sp( 1,-15, 1,1, P.outline);   // right eye
-  sp( 0,-14, 1,1, P.skinD);     // nose
-  sp(-1,-13, 1,1,'#b86040');    // left cheek blush
-  sp( 1,-13, 1,1,'#b86040');    // right cheek blush
+  // ── Huge white beard (triangular, drawn over the tunic) ──
+  const beardRows=[[-14,4],[-13,5],[-12,6],[-11,6],[-10,6],[-9,5],[-8,5],[-7,4],[-6,4],[-5,3],[-4,2]];
+  beardRows.forEach(([dy,w])=>{
+    const dx=-(w>>1);
+    sp(dx,      dy, w,1, GN.beard);
+    sp(dx,      dy, 1,1, GN.beardL);   // lit left edge
+    sp(dx+w-1,  dy, 1,1, GN.beardD);   // shadow right edge
+  });
+  sp(-1,-13, 1,7, GN.beardD);          // central strand groove
+  sp( 1,-12, 1,5, GN.beardD);          // side strand groove
 
-  // ── Pipe (pipe side — right when facing right) ──
-  sp( 3,-15, 3,1, P.trunkD);
-  sp( 5,-14, 1,2, P.trunkD);
-  sp( 4,-14, 2,1, P.trunkD);
-  // Smoke puffs when idle
-  if(!moving){
-    const pf=Math.floor(t*2)%4;
-    sp(6,-15-pf*2, pf>0?2:1,1,'#d0d0d8');
-    sp(7,-17-pf, 1,1,'#b0b0c0');
-  }
+  // ── Round red nose (pokes out between cap and beard) ──
+  sp(-1,-15, 2,2, GN.nose);
+  sp(-1,-15, 1,1, GN.noseL);
 
-  // ── Hat ──
-  // Wide brim (2 rows, with Bayer dither edge)
-  sp(-4,-17, 8,1, P.hatD);
-  sp(-4,-18, 8,1, P.hat);
-  // Crown: tapers upward for conical Snufkin shape
-  sp(-2,-19, 4,1, P.hat);  sp(-2,-19, 1,1, P.hatD);  // crown row 1
-  sp(-2,-20, 4,1, P.hat);  sp( 1,-20, 1,1, P.hatD);
-  sp(-2,-21, 4,1, P.hat);  sp( 1,-21, 1,1, P.hatD);
-  sp(-1,-22, 3,1, P.hat);  sp( 1,-22, 1,1, P.hatD);
-  sp(-1,-23, 2,1, P.hat);
-  sp( 0,-24, 1,1, P.hat);  // hat tip
-  // Hat band (gold)
-  sp(-2,-18, 4,1,'#c49a3a');
-  sp(-1,-18, 1,1,'#e0b848');   // band highlight
-  // Hat shadow strip
-  sp(-1,-21, 1,2, P.hatD);
+  // ── Cap brim (wide, dark fold underneath) ──
+  sp(-4,-18, 8,1, GN.cap);
+  sp(-4,-17, 8,1, GN.capD);
+  sp(-4,-18, 2,1, GN.capL);            // lit brim corner
+
+  // ── Tall cone, tip droops toward facing (shift grows upward) ──
+  const cone=[[-19,7,0],[-20,6,0],[-21,5,1],[-22,5,1],[-23,4,2],[-24,3,2],[-25,2,3],[-26,1,3]];
+  cone.forEach(([dy,w,shift])=>{
+    const dx=-(w>>1)+shift;
+    sp(dx,     dy, w,1, GN.cap);
+    sp(dx,     dy, 1,1, GN.capL);      // lit left edge
+    sp(dx+w-1, dy, 1,1, GN.capD);      // shadow right edge
+  });
+
+  // ── White cap-pom at the tip (sways when idle) ──
+  const sw=moving?0:Math.round(Math.sin(t*3));
+  sp(2+sw,-27, 2,2, GN.beardL);
+  sp(3+sw,-27, 1,1, GN.pomS);
 }
 
 // ── Vegetation ────────────────────────────────────────────────
@@ -1486,7 +1485,7 @@ function render(){
     pixCtx.fillRect(px,py,sz,sz);
   });
   const moving=Math.abs(char.vx)>5||Math.abs(char.vy)>5;
-  drawSnufkin(char.x,char.y,gameTime,moving);
+  drawGnome(char.x,char.y,gameTime,moving);
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(pixCv,0,0,VW,VH);
   renderMinimap();
