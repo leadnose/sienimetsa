@@ -276,7 +276,7 @@ function buildWorld() {
   for(let i=0;i<300;i++) FLOWERS.push({x:r(),y:r(),c:r()>.6?P.fl1:r()>.3?P.fl2:P.fl3,s:0.4+r()*.6});
   PATCHES = [];
   for(let i=0;i<180;i++) PATCHES.push({x:rp(),y:rp(),w:0.004+rp()*0.01,h:0.002+rp()*0.007,d:rp()>.45});
-  MUSHROOMS = SHROOM_POS.map(([fx,fy]) => ({fx,fy,collected:false}));
+  MUSHROOMS = SHROOM_POS.map(([fx,fy]) => ({fx,fy,collected:false,pickT:0}));
   COLLIDERS = [
     ...WATER_DEF.map(w => ({fx:w.x, fy:w.y, fr:Math.max(w.rx,w.ry)*1.05})),
     ...MOUNT_DEF.map(m => ({fx:m.x, fy:m.y, fr:m.s*.075})),
@@ -288,7 +288,9 @@ function buildWorld() {
 const char = {x:0,y:0,vx:0,vy:0,facing:1};
 const cam  = {x:0,y:0};
 let collected=0, gameWon=false, gameTime=0;
-const SPEED=260, CHAR_R=14, PICK_R=38;
+let PICK_SPARKS=[];
+const SPARK_PAL=[[200,22,22],[218,170,20],[255,240,170],[255,255,255]];
+const SPEED=260, CHAR_R=14, PICK_R=38, PICK_ANIM_DUR=0.40;
 
 function findStart() {
   const r = mkRng(mapNum * 7331 + 17);
@@ -347,25 +349,26 @@ function beep(freq,dur,vol=.22){
 }
 let noteIdx=0;
 const PICK_NOTES=[523,587,659,698,784,880];
-function playPick(){beep(PICK_NOTES[noteIdx++%6],.3);}
+function playPick(){
+  const root=PICK_NOTES[noteIdx++%PICK_NOTES.length];
+  beep(root,.22); setTimeout(()=>beep(root*1.25,.18),60); setTimeout(()=>beep(root*1.50,.15),120);
+}
 function playWin(){[523,659,784,1047,784,1047,1319].forEach((f,i)=>setTimeout(()=>beep(f,.35),i*150));}
 
 // ── DOM effects ───────────────────────────────────────────────
-const SPARKS=['⭐','✨','💫','🌟','❤️'];
 const CFTCOL=['#ff595e','#ffca3a','#8ac926','#1982c4','#6a4c93','#ff924c','#fff'];
 const dynSty=document.createElement('style');
-dynSty.textContent=`@keyframes spk{from{transform:translate(0,0)scale(.3);opacity:1}to{transform:translate(var(--dx),var(--dy))scale(1.1);opacity:0}}@keyframes cft{from{transform:translateY(0)rotate(0deg);opacity:1}to{transform:translateY(108vh)rotate(720deg);opacity:.2}}`;
+dynSty.textContent=`@keyframes cft{from{transform:translateY(0)rotate(0deg);opacity:1}to{transform:translateY(108vh)rotate(720deg);opacity:.2}}`;
 document.head.appendChild(dynSty);
-function spawnSparkle(sx,sy){
-  for(let i=0;i<6;i++){
-    const el=document.createElement('div');
-    el.style.cssText=`position:fixed;pointer-events:none;z-index:200;font-size:22px;left:${sx}px;top:${sy}px;animation:spk .65s ease-out forwards`;
-    el.textContent=SPARKS[Math.floor(Math.random()*SPARKS.length)];
-    const a=(i/6)*Math.PI*2,d=40+Math.random()*35;
-    el.style.setProperty('--dx',Math.cos(a)*d+'px');
-    el.style.setProperty('--dy',Math.sin(a)*d+'px');
-    document.body.appendChild(el);
-    setTimeout(()=>el.remove(),700);
+function spawnCanvasSparks(wx,wy){
+  for(let i=0;i<14;i++){
+    const a=(i/14)*Math.PI*2+(Math.random()-.5)*.5;
+    const spd=18+Math.random()*30;
+    PICK_SPARKS.push({wx,wy,
+      vx:Math.cos(a)*spd, vy:Math.sin(a)*spd-20,
+      life:0.28+Math.random()*.20, age:0,
+      col:SPARK_PAL[(Math.random()*SPARK_PAL.length)|0],
+      sz:1+(Math.random()*1.5|0)});
   }
 }
 function confetti(){
@@ -1133,10 +1136,32 @@ function drawShrub(sh){
 
 // ── Mushroom ──────────────────────────────────────────────────
 function drawMushroom(m){
-  if(m.collected) return;
-  const x=wpx(m.fx*WW), y=wpy(m.fy*WH);
-  if(x<-20||x>pixW+20||y<-24||y>pixH+4) return;
+  const wx=m.fx*WW, wy=m.fy*WH;
+  const inRange=!m.collected && Math.hypot(char.x-wx,char.y-wy)<PICK_R;
+  let x=wpx(wx), y=wpy(wy);
   const s=Math.max(1,Math.min(4,(treeSz*.12/PS)|0));
+
+  // Pop animation — mushroom floats up then vanishes
+  if(m.collected){
+    const t=m.pickT?(gameTime-m.pickT)/PICK_ANIM_DUR:1;
+    if(t>=1) return;
+    y-=(t*t*18)|0;
+    pr(x-s/2|0,   y-s*2, s,   s*2, '#dcd4b0');
+    pr(x-s*2-1|0, y-s*2, s*4+2, Math.max(1,(s*.38)|0), '#4a0808');
+    pr(x-(s*2)|0, y-s*3|0, s*4, Math.max(1,(s*1.8)|0), '#dd2424');
+    return;
+  }
+
+  // Bob vertically when in pick range
+  y-=inRange?(Math.sin(gameTime*9)*2.5+.5)|0:0;
+  if(x<-20||x>pixW+20||y<-24||y>pixH+4) return;
+
+  // AoE2-style selection pip below mushroom when in range
+  if(inRange){
+    pr(x-2,y+2,5,1,'#70ee70');
+    pr(x-1,y+3,3,1,'#70ee70');
+    pr(x,  y+4,1,1,'#70ee70');
+  }
 
   // Shadow
   pr(x-s,y+1,s*2,1,'#2a3a10');
@@ -1385,6 +1410,13 @@ function render(){
   MOUNT_DEF.slice().sort((a,b)=>b.s-a.s).forEach(m=>drawHill(m));
   drawVegetation();
   MUSHROOMS.forEach(m=>drawMushroom(m));
+  PICK_SPARKS.forEach(s=>{
+    const px=wpx(s.wx),py=wpy(s.wy);
+    if(px<0||px>=pixW||py<0||py>=pixH) return;
+    const sz=Math.max(1,(s.sz*(1-s.age/s.life)+.5)|0);
+    pixCtx.fillStyle=`rgb(${s.col[0]},${s.col[1]},${s.col[2]})`;
+    pixCtx.fillRect(px,py,sz,sz);
+  });
   const moving=Math.abs(char.vx)>5||Math.abs(char.vy)>5;
   drawSnufkin(char.x,char.y,gameTime,moving);
   ctx.imageSmoothingEnabled=false;
@@ -1403,12 +1435,14 @@ function update(dt){
   else { if(!blocked(nx,char.y)) char.x=nx; if(!blocked(char.x,ny)) char.y=ny; }
   char.vx=dx*SPEED; char.vy=dy*SPEED;
   easeCamera(dt);
+  PICK_SPARKS.forEach(s=>{s.age+=dt;s.wx+=s.vx*dt;s.wy+=s.vy*dt;s.vy+=55*dt;});
+  PICK_SPARKS=PICK_SPARKS.filter(s=>s.age<s.life);
   MUSHROOMS.forEach(m=>{
     if(m.collected) return;
     if(Math.hypot(char.x-m.fx*WW,char.y-m.fy*WH)<PICK_R){
-      m.collected=true; collected++;
+      m.collected=true; m.pickT=gameTime; collected++;
       document.getElementById('cnt').textContent=collected;
-      playPick(); spawnSparkle(char.x-cam.x,char.y-cam.y);
+      playPick(); spawnCanvasSparks(m.fx*WW,m.fy*WH);
       if(collected>=MUSHROOMS.length) setTimeout(showWin,400);
     }
   });
@@ -1437,7 +1471,7 @@ function resize(){
   pixW=Math.ceil(VW/PS); pixH=Math.ceil(VH/PS);
   pixCv.width=pixW; pixCv.height=pixH;
   ctx.imageSmoothingEnabled=false;
-  for(const k in SP) delete SP[k]; // rebuild sprites for new PS
+  for(const k in SP) delete SP[k]; PICK_SPARKS=[]; // rebuild sprites for new PS
   setTreeSize();
   buildWorld();
   if(cs) MUSHROOMS.forEach((m,i)=>m.collected=Boolean(cs[i]));
@@ -1450,8 +1484,8 @@ function resize(){
 
 function startGame(){
   document.getElementById('btn-play').blur();
-  collected=0; gameWon=false; gameTime=0;
-  MUSHROOMS.forEach(m=>m.collected=false);
+  collected=0; gameWon=false; gameTime=0; PICK_SPARKS=[];
+  MUSHROOMS.forEach(m=>{m.collected=false;m.pickT=0;});
   document.getElementById('cnt').textContent='0';
   document.getElementById('win').classList.remove('show');
   const start=findStart(); char.x=start.x; char.y=start.y; char.vx=0; char.vy=0; char.facing=1;
