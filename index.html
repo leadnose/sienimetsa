@@ -138,6 +138,9 @@ const NUM_VARIANTS=8; // shape variants per tree species+size
 let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], TERRAIN_ZONES=[];
 let TREES=[], SHRUBS=[], FLOWERS=[], PATCHES=[], MUSHROOMS=[], COLLIDERS=[], UNDERSTORY=[];
 let TREE_GRID=null, TREE_CELL=1; // spatial grid of trunk colliders
+let PATHS=[], PATH_MASK=null;    // trail polylines + rasterised influence grid
+const PM_N=200;                  // path-influence grid resolution
+const PATH_CAP=190, PATH_MAXDEPTH=5; // fractal-branch budget / recursion depth
 
 function terrainAt(x,y){
   let bestInf=0, best=T_GRASS;
@@ -206,12 +209,199 @@ function generateWorld(seed){
       t:tzPool[(r()*tzPool.length)|0]
     });
   }
+  generatePaths(r);
+}
+
+// ── Path network ──────────────────────────────────────────────
+// Forests people walk get trails between destinations. We pick nodes
+// (border trailheads, lake shores, mountain feet, a clearing), connect
+// them with a minimum spanning tree, and read each edge's *tier* from how
+// the tree splits when that edge is cut: arteries that separate large
+// halves are main trails (tier 0); twigs to a single spot are side paths
+// (tier 1). Tier-2 dead-end spurs then wander off existing trails and fade
+// into nowhere — some ending at a forager's secret patch, some at nothing.
+function generatePaths(r){
+  PATHS=[];
+  const nodes=[];
+  const okSpot=(x,y)=> !WATER_DEF.some(w=>Math.hypot(x-w.x,y-w.y)<Math.max(w.rx,w.ry)*1.2)
+                    && !MOUNT_DEF.some(m=>Math.hypot(x-m.x,y-m.y)<m.s*.10);
+  const nTH=3+((r()>.5)?1:0);                      // border trailheads
+  for(let i=0;i<nTH;i++){
+    const side=(r()*4)|0, t=0.10+r()*.80;
+    nodes.push(side===0?{x:t,y:.02}:side===1?{x:.98,y:t}:side===2?{x:t,y:.98}:{x:.02,y:t});
+  }
+  WATER_DEF.forEach(w=>{                            // a point on each shore
+    const a=r()*Math.PI*2;
+    nodes.push({x:clamp(w.x+Math.cos(a)*w.rx*1.4,.03,.97),
+                y:clamp(w.y+Math.sin(a)*w.ry*1.4,.03,.97)});
+  });
+  MOUNT_DEF.slice().sort((a,b)=>b.s-a.s).slice(0,3).forEach(m=>{ // viewpoints
+    nodes.push({x:clamp(m.x,.04,.96),y:clamp(m.y+m.s*.10,.04,.96)});
+  });
+  let mid=4+((r()*4)|0);                            // interior junctions → denser web
+  for(let tries=0; mid>0 && tries<60; tries++){
+    const x=0.12+r()*.76, y=0.12+r()*.76;
+    if(okSpot(x,y)){ nodes.push({x,y}); mid--; }
+  }
+  const N=nodes.length;
+  if(N<3){ buildPathMask(); return; }
+  const dist=(a,b)=>Math.hypot((a.x-b.x)*WW,(a.y-b.y)*WH);
+  // Prim minimum spanning tree, weighted by world distance
+  const inTree=[0], rest=new Set(), used=new Set();
+  for(let i=1;i<N;i++) rest.add(i);
+  const mst=[];
+  while(rest.size){
+    let bd=Infinity,ba=0,bb=-1;
+    for(const i of inTree) for(const j of rest){
+      const d=dist(nodes[i],nodes[j]);
+      if(d<bd){bd=d;ba=i;bb=j;}
+    }
+    mst.push([ba,bb]); used.add(ba+'-'+bb); used.add(bb+'-'+ba); inTree.push(bb); rest.delete(bb);
+  }
+  // Subtree sizes (rooted at 0) → edge importance = smaller side it splits
+  const adj=Array.from({length:N},()=>[]);
+  mst.forEach(([a,b])=>{adj[a].push(b);adj[b].push(a);});
+  const size=new Array(N).fill(1), parent=new Array(N).fill(0),
+        order=[], seen=new Array(N).fill(false), stack=[0];
+  seen[0]=true;
+  while(stack.length){const u=stack.pop();order.push(u);for(const v of adj[u])if(!seen[v]){seen[v]=true;parent[v]=u;stack.push(v);}}
+  for(let i=order.length-1;i>0;i--){const u=order[i];size[parent[u]]+=size[u];}
+  mst.forEach(([a,b])=>{
+    const child=parent[b]===a?b:a;
+    const imp=Math.min(size[child],N-size[child]);
+    PATHS.push({tier:imp>=3?0:1,deadEnd:false,pts:routePath(nodes[a],nodes[b],r)});
+  });
+  // Extra loop edges: a few short non-tree links → a real network, not a tree
+  const cand=[];
+  for(let i=0;i<N;i++) for(let j=i+1;j<N;j++) if(!used.has(i+'-'+j)) cand.push([i,j,dist(nodes[i],nodes[j])]);
+  cand.sort((p,q)=>p[2]-q[2]);
+  const maxLoop=Math.min(WW,WH)*0.55, nLoop=2+((r()*3)|0);
+  for(let k=0,added=0; k<cand.length && added<nLoop; k++){
+    if(cand[k][2]>maxLoop) break;
+    PATHS.push({tier:1,deadEnd:false,pts:routePath(nodes[cand[k][0]],nodes[cand[k][1]],r)});
+    added++;
+  }
+  // Fractal capillaries: seed branches off the backbone arteries; each branch
+  // recursively sprouts smaller, self-similar branches (growBranch), so the
+  // network repeats the same forking pattern at every scale. The finest twigs
+  // are the trails that lead to nowhere.
+  const backbone=PATHS.slice();                    // arteries only (no branches yet)
+  const nSeed=Math.max(5,Math.round(backbone.length*1.4));
+  for(let s=0;s<nSeed && PATHS.length<PATH_CAP;s++){
+    const base=backbone[(r()*backbone.length)|0];
+    const si=(r()*(base.pts.length-1))|0;
+    const ap=base.pts[si], an=base.pts[si+1];
+    const along=Math.atan2(an.y-ap.y,an.x-ap.x), side=r()<.5?1:-1;
+    growBranch(r,ap.x,ap.y, along+side*(0.7+r()*0.7), 0.11+r()*0.09, Math.min(2,base.tier+1), 0);
+  }
+  buildPathMask();
+}
+// One self-similar branch: walk a wandering polyline of length `len`, then fork
+// into a few shorter children at branch angles — the same rule recursing down,
+// which is what makes the whole network fractal. Finer generations wander more
+// and shrink toward nothing; every branch is a dead-end (leads nowhere).
+function growBranch(r,x,y,dir,len,tier,depth){
+  if(PATHS.length>=PATH_CAP || len<0.02) return;
+  const stepLen=0.0035, steps=Math.max(3,Math.round(len/stepLen)), wander=0.12+depth*0.05;
+  const curl=(r()-.5)*0.22;          // constant turn → branch arcs, never straight
+  const pts=[{x,y}]; let cx=x,cy=y,cd=dir;
+  for(let k=0;k<steps;k++){
+    cd+=curl+(r()-.5)*wander;
+    const nx=clamp(cx+Math.cos(cd)*stepLen,.02,.98), ny=clamp(cy+Math.sin(cd)*stepLen,.02,.98);
+    if(WATER_DEF.some(w=>Math.hypot(nx-w.x,ny-w.y)<Math.max(w.rx,w.ry))) break;
+    if(MOUNT_DEF.some(m=>Math.hypot(nx-m.x,ny-m.y)<m.s*.09)) break;
+    cx=nx; cy=ny; pts.push({x:cx,y:cy});
+  }
+  if(pts.length<2) return;
+  PATHS.push({tier:Math.min(2,tier),deadEnd:true,pts});
+  if(depth>=PATH_MAXDEPTH) return;
+  const nKids=1+(r()<0.62?1:0)+(r()<0.24?1:0);    // mostly 1–2, sometimes 3
+  for(let c=0;c<nKids && PATHS.length<PATH_CAP;c++){
+    const ai=1+((r()*(pts.length-1))|0);           // fork point along the branch
+    const a0=pts[ai-1], a1=pts[ai];
+    const baseDir=Math.atan2(a1.y-a0.y,a1.x-a0.x), sd=(c&1)?1:-1;
+    growBranch(r,a1.x,a1.y, baseDir+sd*(0.5+r()*0.6), len*(0.55+r()*0.16), tier+1, depth+1);
+  }
+}
+// Route an edge as a fractal Brownian curve: recursively displace the midpoint
+// of every segment perpendicular to itself. Because the displacement scales
+// with each (halving) segment, the trail wiggles at every scale and never runs
+// straight, while the fixed endpoints keep it connected. Points are then nudged
+// clear of water/peaks.
+function pathNudge(p){
+  WATER_DEF.forEach(w=>{
+    const dx=p.x-w.x,dy=p.y-w.y,rr=Math.max(w.rx,w.ry)*1.1,d=Math.hypot(dx,dy);
+    if(d<rr&&d>1e-4){p.x=w.x+dx/d*rr;p.y=w.y+dy/d*rr;}
+  });
+  MOUNT_DEF.forEach(m=>{
+    const dx=p.x-m.x,dy=p.y-m.y,rr=m.s*.09,d=Math.hypot(dx,dy);
+    if(d<rr&&d>1e-4){p.x=m.x+dx/d*rr;p.y=m.y+dy/d*rr;}
+  });
+  p.x=clamp(p.x,.02,.98); p.y=clamp(p.y,.02,.98);
+  return p;
+}
+function routePath(a,b,r){
+  let pts=[{x:a.x,y:a.y},{x:b.x,y:b.y}];
+  const rough=0.26;                 // perpendicular displacement, ∝ segment length
+  // Subdivide enough that even long edges have short chords (no straight runs);
+  // displacement persists at every level so the wiggle is scale-free.
+  const L=Math.hypot(b.x-a.x,b.y-a.y);
+  const levels=Math.max(4,Math.min(8,Math.ceil(Math.log2(Math.max(2,L/0.0016)))));
+  for(let lvl=0; lvl<levels; lvl++){
+    const next=[pts[0]];
+    for(let i=0;i<pts.length-1;i++){
+      const p0=pts[i], p1=pts[i+1];
+      const sx=p1.x-p0.x, sy=p1.y-p0.y, sl=Math.hypot(sx,sy)||1;
+      const disp=(r()-.5)*rough*sl;            // self-similar: shrinks as segments halve
+      next.push({x:(p0.x+p1.x)/2 - sy/sl*disp, y:(p0.y+p1.y)/2 + sx/sl*disp});
+      next.push(p1);
+    }
+    pts=next;
+  }
+  pts.forEach(pathNudge);
+  return pts;
+}
+// Corridor radius (world px) by tier — wider trails clear more forest.
+function pathRadW(tier){ return tier===0?treeSz*.52:tier===1?treeSz*.40:treeSz*.30; }
+// Rasterise every corridor into PATH_MASK; cell value = best (widest) tier
+// code covering it (3=main, 2=side, 1=faint, 0=none).
+function buildPathMask(){
+  PATH_MASK=new Uint8Array(PM_N*PM_N);
+  for(const path of PATHS){
+    const code=path.tier===0?3:path.tier===1?2:1, rw=pathRadW(path.tier);
+    for(let i=0;i<path.pts.length-1;i++) stampPathSeg(path.pts[i],path.pts[i+1],rw,code);
+  }
+}
+function stampPathSeg(p0,p1,rw,code){
+  const ax=p0.x*WW,ay=p0.y*WH,bx=p1.x*WW,by=p1.y*WH;
+  const gx0=clamp(((Math.min(ax,bx)-rw)/WW*PM_N)|0,0,PM_N-1);
+  const gx1=clamp(((Math.max(ax,bx)+rw)/WW*PM_N)|0,0,PM_N-1);
+  const gy0=clamp(((Math.min(ay,by)-rw)/WH*PM_N)|0,0,PM_N-1);
+  const gy1=clamp(((Math.max(ay,by)+rw)/WH*PM_N)|0,0,PM_N-1);
+  const dx=bx-ax,dy=by-ay,ll=dx*dx+dy*dy||1,rw2=rw*rw;
+  for(let gy=gy0;gy<=gy1;gy++){
+    const wy=(gy+.5)/PM_N*WH;
+    for(let gx=gx0;gx<=gx1;gx++){
+      const wx=(gx+.5)/PM_N*WW;
+      let t=((wx-ax)*dx+(wy-ay)*dy)/ll; t=t<0?0:t>1?1:t;
+      const ex=wx-(ax+dx*t), ey=wy-(ay+dy*t);
+      if(ex*ex+ey*ey<=rw2){const idx=gy*PM_N+gx; if(PATH_MASK[idx]<code) PATH_MASK[idx]=code;}
+    }
+  }
+}
+function pathCodeAt(wx,wy){
+  if(!PATH_MASK) return 0;
+  const gx=(wx/WW*PM_N)|0, gy=(wy/WH*PM_N)|0;
+  if(gx<0||gy<0||gx>=PM_N||gy>=PM_N) return 0;
+  return PATH_MASK[gy*PM_N+gx];
 }
 
 function buildWorld() {
   generateWorld(mapNum);
   const r  = mkRng(mapNum * 1009 + 42);
   const rp = mkRng(mapNum * 1013 + 77);
+  const rpath = mkRng(mapNum * 5101 + 61); // path-corridor thinning (keeps tree RNG stable)
+  const deadEnds = PATHS.filter(p=>p.deadEnd).map(p=>p.pts[p.pts.length-1]);
   const mCX = MOUNT_DEF.reduce((s,m)=>s+m.x,0)/MOUNT_DEF.length;
   const mCY = MOUNT_DEF.reduce((s,m)=>s+m.y,0)/MOUNT_DEF.length;
   // Tree stands: each spawns `n` trees placed/sized by `gen`. Conifers favour
@@ -256,6 +446,9 @@ function buildWorld() {
   TREES=TREES.filter(tr=>{
     if(WATER_DEF.some(w=>Math.hypot(tr.x-w.x,tr.y-w.y)<Math.max(w.rx,w.ry)*0.92)) return false;
     if(MOUNT_DEF.some(m=>Math.hypot(tr.x-m.x,tr.y-m.y)<m.s*.09)) return false;
+    const pc=pathCodeAt(tr.x*WW,tr.y*WH);
+    if(pc>=2) return false;                 // main/side trail: clear a walkable lane
+    if(pc===1 && rpath()<.70) return false; // faint trail: thinned, threads between trunks
     const wx=tr.x*WW, wy=tr.y*WH, sz=treeSz*tr.m;
     const gx=(wx/SPACE_CELL)|0, gy=(wy/SPACE_CELL)|0;
     for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
@@ -284,7 +477,7 @@ function buildWorld() {
       const ux=clamp(tr.x+Math.cos(a)*d,0.01,.99);
       const uy=clamp(tr.y+Math.sin(a)*d,0.01,.99);
       const inW=WATER_DEF.some(w=>Math.hypot(ux-w.x,uy-w.y)<Math.max(w.rx,w.ry)*1.1);
-      if(!inW) UNDERSTORY.push({x:ux,y:uy,t:cfg.pool[(ur()*cfg.pool.length)|0]});
+      if(!inW && pathCodeAt(ux*WW,uy*WH)<2) UNDERSTORY.push({x:ux,y:uy,t:cfg.pool[(ur()*cfg.pool.length)|0]});
     }
   });
   SHRUBS = [];
@@ -301,6 +494,7 @@ function buildWorld() {
   const nS=18+((sr()*9)|0);
   const mSep=Math.min(WW,WH)*0.03;
   const spotOK=(fx,fy)=>{
+    if(pathCodeAt(fx*WW,fy*WH)>=2) return false; // already picked clean along main trails
     if(WATER_DEF.some(w=>Math.hypot(fx-w.x,fy-w.y)<Math.max(w.rx,w.ry)*1.15)) return false;
     if(MOUNT_DEF.some(m=>Math.hypot(fx-m.x,fy-m.y)<m.s*.09)) return false;
     for(const m of MUSHROOMS) if(Math.hypot((fx-m.fx)*WW,(fy-m.fy)*WH)<mSep) return false;
@@ -308,7 +502,12 @@ function buildWorld() {
   };
   for(let tries=0; MUSHROOMS.length<nS && tries<3000; tries++){
     let fx,fy;
-    if(TREES.length && sr()<0.78){
+    if(deadEnds.length && sr()<0.24){
+      // forager's secret spot: cluster at the end of a dead-end trail
+      const e=deadEnds[(sr()*deadEnds.length)|0], a=sr()*Math.PI*2, d=0.008+sr()*.022;
+      fx=clamp(e.x+Math.cos(a)*d,0.03,0.97);
+      fy=clamp(e.y+Math.sin(a)*d,0.05,0.95);
+    } else if(TREES.length && sr()<0.78){
       const tr=TREES[(sr()*TREES.length)|0], sz=treeSz*tr.m;
       const a=Math.PI*(0.12+sr()*0.76);   // downward arc → in front of the tree
       const d=sz*(0.55+sr()*0.85);        // just outside trunk, under the canopy
@@ -340,6 +539,13 @@ const TREE_PAD=7;
 
 function findStart() {
   const r = mkRng(mapNum * 7331 + 17);
+  // Prefer to begin on a main/side trail (a forest entrance)
+  const trails = PATHS.filter(p=>p.tier<=1);
+  for(let i=0; i<300 && trails.length; i++){
+    const p=trails[(r()*trails.length)|0], pt=p.pts[(r()*p.pts.length)|0];
+    const x=pt.x*WW, y=pt.y*WH;
+    if(!blocked(x,y)) return {x,y};
+  }
   for(let i=0; i<500; i++){
     const x = CHAR_R*2 + r()*(WW-CHAR_R*4);
     const y = CHAR_R*2 + r()*(WH-CHAR_R*4);
@@ -976,6 +1182,69 @@ function drawGround(){
   });
 }
 
+// ── Paths ─────────────────────────────────────────────────────
+// Worn ground, not painted lines. We read back the rendered ground and stamp
+// each trail segment into it: the half-width wobbles via world-space noise,
+// the colour is Bayer-dithered among a small earth palette, and the outer
+// 2–3px are stippled (kept-grass dither) so the trail dissolves into the
+// terrain instead of sitting on top of it — the same look as the ground
+// itself. Tier 0 packed dirt w/ pebbles · tier 1 trampled · tier 2 faint
+// foot/deer trail; dead-ends fade away over their final stretch.
+const PATH_CFG=[
+  /* tier0 */ {hw:5.6, edge:2.6, pal:[[70,57,33],[92,75,44],[118,99,60],[150,128,82]], pebble:true},
+  /* tier1 */ {hw:3.4, edge:2.2, pal:[[64,53,31],[86,71,42],[110,92,55]],              pebble:false},
+  /* tier2 */ {hw:1.7, edge:1.8, pal:[[63,72,37],[80,90,48],[55,64,32]],               pebble:false, faint:true},
+];
+function drawPaths(){
+  if(!PATHS.length) return;
+  const id=pixCtx.getImageData(0,0,pixW,pixH), buf=id.data;
+  const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
+  for(const path of PATHS){
+    const cfg=PATH_CFG[path.tier], pts=path.pts, n=pts.length;
+    for(let i=0;i<n-1;i++){
+      const x0=wpx(pts[i].x*WW),   y0=wpy(pts[i].y*WH);
+      const x1=wpx(pts[i+1].x*WW), y1=wpy(pts[i+1].y*WH);
+      const reach=cfg.hw*1.3+cfg.edge;
+      if((x0<-reach&&x1<-reach)||(x0>pixW+reach&&x1>pixW+reach)||
+         (y0<-reach&&y1<-reach)||(y0>pixH+reach&&y1>pixH+reach)) continue;
+      // faint dead-end twigs thin out and dissolve over their final ~60%
+      const fade=(path.deadEnd&&path.tier===2)?Math.max(0,1-Math.max(0,(i/(n-1)-0.40))/0.60):1;
+      if(fade<=0.03) continue;
+      stampPath(buf,cpx,cpy,x0,y0,x1,y1,cfg,fade);
+    }
+  }
+  pixCtx.putImageData(id,0,0);
+}
+function stampPath(buf,cpx,cpy,x0,y0,x1,y1,cfg,fade){
+  const reachMax=cfg.hw*1.3+cfg.edge;
+  const minx=Math.max(0,(Math.min(x0,x1)-reachMax)|0), maxx=Math.min(pixW-1,(Math.max(x0,x1)+reachMax)|0);
+  const miny=Math.max(0,(Math.min(y0,y1)-reachMax)|0), maxy=Math.min(pixH-1,(Math.max(y0,y1)+reachMax)|0);
+  if(minx>maxx||miny>maxy) return;
+  const dx=x1-x0, dy=y1-y0, ll=dx*dx+dy*dy||1, np=cfg.pal.length;
+  for(let py=miny;py<=maxy;py++){
+    for(let px=minx;px<=maxx;px++){
+      let t=((px-x0)*dx+(py-y0)*dy)/ll; t=t<0?0:t>1?1:t;
+      const ex=px-(x0+dx*t), ey=py-(y0+dy*t), d=Math.sqrt(ex*ex+ey*ey);
+      const wx=px+cpx, wy=py+cpy;                       // world-pixel coords (stable while scrolling)
+      const h1=((wx*23)^(wy*47))&0xff, h2=((wx*61)^(wy*13))&0xff;
+      const hw=cfg.hw*(0.70+(h1/255)*0.60);             // organic wobble of the edge
+      const reach=hw*fade+cfg.edge;
+      if(d>reach) continue;
+      const bv=b4(wx,wy);
+      if(cfg.faint && ((wx+wy)&3)===0) continue;        // faint trails are broken/dotted
+      if(d>hw*fade){                                     // outer band → stipple into ground
+        const a=(reach-d)/cfg.edge;
+        if(bv/16>a) continue;
+      } else if(fade<1 && bv/16>fade) continue;          // dead-end core also dissolves
+      const ni=h2*(np-1)/255; let i0=ni|0; if(i0>np-2)i0=np-2;
+      let c=cfg.pal[(ni-i0)*16>bv?i0+1:i0];
+      if(cfg.pebble && d<hw*0.75 && h1<9) c=h2<128?[176,154,112]:[58,47,27]; // pebbles/dark flecks
+      const p=4*(py*pixW+px);
+      buf[p]=c[0]; buf[p+1]=c[1]; buf[p+2]=c[2]; buf[p+3]=255;
+    }
+  }
+}
+
 // ── Rivers ────────────────────────────────────────────────────
 // Banks: 3-ring earth transition. Water body with animated flow dots.
 function drawRivers(){
@@ -1456,6 +1725,14 @@ function renderMinimap(){
     mmCtx.fillStyle=P.mm_h;
     mmCtx.beginPath();mmCtx.arc(m.x*mw,m.y*mh,m.s*Math.min(mw,mh)*.09,0,Math.PI*2);mmCtx.fill();
   });
+  PATHS.forEach(p=>{
+    if(p.tier===2){mmCtx.strokeStyle='rgba(184,162,104,.5)';mmCtx.lineWidth=1;mmCtx.setLineDash([2,2]);}
+    else{mmCtx.strokeStyle=p.tier===0?'#cca868':'#a98a54';mmCtx.lineWidth=p.tier===0?2:1.3;mmCtx.setLineDash([]);}
+    mmCtx.beginPath();
+    p.pts.forEach((pt,i)=>i===0?mmCtx.moveTo(pt.x*mw,pt.y*mh):mmCtx.lineTo(pt.x*mw,pt.y*mh));
+    mmCtx.stroke();
+  });
+  mmCtx.setLineDash([]);
   mmCtx.fillStyle='#2a5010';
   TREES.forEach(t=>mmCtx.fillRect(t.x*mw-1,t.y*mh-1,2,2));
   MUSHROOMS.forEach(m=>{
@@ -1472,6 +1749,7 @@ function renderMinimap(){
 function render(){
   pixCtx.clearRect(0,0,pixW,pixH);
   drawGround();
+  drawPaths();
   drawRivers();
   drawWaters();
   MOUNT_DEF.slice().sort((a,b)=>b.s-a.s).forEach(m=>drawHill(m));
@@ -1497,10 +1775,13 @@ function update(dt){
   gameTime+=dt;
   const {dx,dy}=inputDir();
   if(dx!==0) char.facing=dx>0?1:-1;
-  const nx=clamp(char.x+dx*SPEED*dt,CHAR_R,WW-CHAR_R), ny=clamp(char.y+dy*SPEED*dt,CHAR_R,WH-CHAR_R);
+  // Trails are quicker going: main > side > faint > off-trail
+  const pc=pathCodeAt(char.x,char.y);
+  const spd=SPEED*(pc===3?1.5:pc===2?1.3:pc===1?1.12:1);
+  const nx=clamp(char.x+dx*spd*dt,CHAR_R,WW-CHAR_R), ny=clamp(char.y+dy*spd*dt,CHAR_R,WH-CHAR_R);
   if(!blocked(nx,ny)){ char.x=nx; char.y=ny; }
   else { if(!blocked(nx,char.y)) char.x=nx; if(!blocked(char.x,ny)) char.y=ny; }
-  char.vx=dx*SPEED; char.vy=dy*SPEED;
+  char.vx=dx*spd; char.vy=dy*spd;
   easeCamera(dt);
   PICK_SPARKS.forEach(s=>{s.age+=dt;s.wx+=s.vx*dt;s.wy+=s.vy*dt;s.vy+=55*dt;});
   PICK_SPARKS=PICK_SPARKS.filter(s=>s.age<s.life);
