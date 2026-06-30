@@ -135,8 +135,9 @@ const WORLD_SCALE=7; // world is WORLD_SCALE × viewport size
 const NUM_VARIANTS=8; // shape variants per tree species+size
 
 // ── World data ────────────────────────────────────────────────
-let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], SHROOM_POS=[], TERRAIN_ZONES=[];
+let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], TERRAIN_ZONES=[];
 let TREES=[], SHRUBS=[], FLOWERS=[], PATCHES=[], MUSHROOMS=[], COLLIDERS=[], UNDERSTORY=[];
+let TREE_GRID=null, TREE_CELL=1; // spatial grid of trunk colliders
 
 function terrainAt(x,y){
   let bestInf=0, best=T_GRASS;
@@ -191,14 +192,6 @@ function generateWorld(seed){
     }
     RIVERS.push(pts);
   }
-  SHROOM_POS = [];
-  const nS=18+Math.floor(r()*9);
-  for(let tries=0; SHROOM_POS.length<nS && tries<400; tries++){
-    const mx=0.03+r()*.94, my=0.03+r()*.94;
-    const inW=WATER_DEF.some(w=>Math.hypot(mx-w.x,my-w.y)<Math.max(w.rx,w.ry)*1.35);
-    const inM=MOUNT_DEF.some(m=>Math.hypot(mx-m.x,my-m.y)<m.s*.09);
-    if(!inW&&!inM) SHROOM_POS.push([mx,my]);
-  }
   // Terrain zones: 1=sand 2=marsh 3=rock 4=gravel
   TERRAIN_ZONES = [];
   const nTZ = 18 + Math.floor(r()*10);
@@ -221,17 +214,23 @@ function buildWorld() {
   const rp = mkRng(mapNum * 1013 + 77);
   const mCX = MOUNT_DEF.reduce((s,m)=>s+m.x,0)/MOUNT_DEF.length;
   const mCY = MOUNT_DEF.reduce((s,m)=>s+m.y,0)/MOUNT_DEF.length;
+  // Tree stands: each spawns `n` trees placed/sized by `gen`. Conifers favour
+  // the highlands around the mountain cluster centre (mCX,mCY); broadleaf and
+  // mixed stands fill the lowlands. Edit `n` to tune density per stand.
+  const STANDS=[
+    {n:2000, gen:()=>({x:r()*.42,                       y:.50+r()*.48,                  t:TR_DECIDUOUS,                 m:0.8+r()*.5})},
+    {n: 960, gen:()=>({x:clamp(mCX-.15+r()*.30,0,1),    y:r()*.55,                      t:TR_PINE,                      m:0.8+r()*.4})},
+    {n: 600, gen:()=>({x:clamp(mCX+r()*.40,0,1),        y:clamp(mCY+r()*.35,0,.55),     t:TR_PINE,                      m:0.7+r()*.5})},
+    {n:1500, gen:()=>({x:r(),                           y:r(),                          t:r()>.45?TR_PINE:TR_DECIDUOUS, m:0.7+r()*.6})},
+    {n: 720, gen:()=>({x:r()*.44,                       y:r()*.58,                      t:TR_SPRUCE,                    m:0.7+r()*1.1})},
+    {n: 600, gen:()=>({x:clamp(mCX-.1+r()*.45,0,1),     y:r()*.48,                      t:TR_SPRUCE,                    m:0.8+r()*1.0})},
+    {n: 440, gen:()=>({x:r(),                           y:r(),                          t:TR_SPRUCE,                    m:0.5+r()*1.2})},
+    {n: 680, gen:()=>({x:r(),                           y:r(),                          t:TR_FIR,                       m:0.7+r()*.8})},
+    {n: 360, gen:()=>({x:r()*.38,                       y:.52+r()*.42,                  t:TR_FIR,                       m:0.9+r()*.9})},
+    {n: 460, gen:()=>({x:r(),                           y:r(),                          t:TR_SCOTS,                     m:0.9+r()*.9})},
+  ];
   TREES = [];
-  for(let i=0;i<600;i++) TREES.push({x:r()*.42,y:.50+r()*.48,t:TR_DECIDUOUS,m:0.8+r()*.5});
-  for(let i=0;i<300;i++) TREES.push({x:clamp(mCX-.15+r()*.30,0,1),y:r()*.55,t:TR_PINE,m:0.8+r()*.4});
-  for(let i=0;i<180;i++) TREES.push({x:clamp(mCX+r()*.40,0,1),y:clamp(mCY+r()*.35,0,.55),t:TR_PINE,m:0.7+r()*.5});
-  for(let i=0;i<450;i++) TREES.push({x:r(),y:r(),t:r()>.45?TR_PINE:TR_DECIDUOUS,m:0.7+r()*.6});
-  for(let i=0;i<220;i++) TREES.push({x:r()*.44,y:r()*.58,t:TR_SPRUCE,m:0.7+r()*1.1});
-  for(let i=0;i<180;i++) TREES.push({x:clamp(mCX-.1+r()*.45,0,1),y:r()*.48,t:TR_SPRUCE,m:0.8+r()*1.0});
-  for(let i=0;i<130;i++) TREES.push({x:r(),y:r(),t:TR_SPRUCE,m:0.5+r()*1.2});
-  for(let i=0;i<200;i++) TREES.push({x:r(),y:r(),t:TR_FIR,m:0.7+r()*.8});
-  for(let i=0;i<110;i++) TREES.push({x:r()*.38,y:.52+r()*.42,t:TR_FIR,m:0.9+r()*.9});
-  for(let i=0;i<140;i++) TREES.push({x:r(),y:r(),t:TR_SCOTS,m:0.9+r()*.9});
+  for(const {n,gen} of STANDS) for(let i=0;i<n;i++) TREES.push(gen());
   // Assign shape variant per tree (separate RNG so positions are unaffected)
   const rv=mkRng(mapNum*3007+99);
   TREES.forEach(tr=>tr.v=(rv()*NUM_VARIANTS)|0);
@@ -248,6 +247,24 @@ function buildWorld() {
     if(!cfg) return true; // T_GRASS: keep as-is
     if(r()>cfg.keep) return false;
     tr.t=cfg.pool[(r()*cfg.pool.length)|0];
+    return true;
+  });
+  // Remove trees standing in water or on mountain peaks, and thin overlapping
+  // clumps via a spacing grid (canopies may still touch — that reads as forest).
+  const placeGrid=new Map();
+  const SPACE_CELL=Math.max(40,treeSz*1.8);
+  TREES=TREES.filter(tr=>{
+    if(WATER_DEF.some(w=>Math.hypot(tr.x-w.x,tr.y-w.y)<Math.max(w.rx,w.ry)*0.92)) return false;
+    if(MOUNT_DEF.some(m=>Math.hypot(tr.x-m.x,tr.y-m.y)<m.s*.09)) return false;
+    const wx=tr.x*WW, wy=tr.y*WH, sz=treeSz*tr.m;
+    const gx=(wx/SPACE_CELL)|0, gy=(wy/SPACE_CELL)|0;
+    for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
+      const arr=placeGrid.get((gx+ox)+','+(gy+oy)); if(!arr) continue;
+      for(const o of arr)
+        if(Math.hypot(wx-o.wx,wy-o.wy)<(sz+o.sz)*0.30) return false;
+    }
+    const k=gx+','+gy; let arr=placeGrid.get(k); if(!arr){arr=[];placeGrid.set(k,arr);}
+    arr.push({wx,wy,sz});
     return true;
   });
   UNDERSTORY = [];
@@ -276,11 +293,37 @@ function buildWorld() {
   for(let i=0;i<300;i++) FLOWERS.push({x:r(),y:r(),c:r()>.6?P.fl1:r()>.3?P.fl2:P.fl3,s:0.4+r()*.6});
   PATCHES = [];
   for(let i=0;i<180;i++) PATCHES.push({x:rp(),y:rp(),w:0.004+rp()*0.01,h:0.002+rp()*0.007,d:rp()>.45});
-  MUSHROOMS = SHROOM_POS.map(([fx,fy]) => ({fx,fy,collected:false,pickT:0}));
+  // Mushrooms grow mostly near trees (mycorrhizal partners), rest in clearings.
+  // Each anchored shroom sits in front of its tree (downward arc) so it stays
+  // visible and reachable; a spacing rule keeps them spread across the map.
+  MUSHROOMS=[];
+  const sr=mkRng(mapNum*7919+23);
+  const nS=18+((sr()*9)|0);
+  const mSep=Math.min(WW,WH)*0.03;
+  const spotOK=(fx,fy)=>{
+    if(WATER_DEF.some(w=>Math.hypot(fx-w.x,fy-w.y)<Math.max(w.rx,w.ry)*1.15)) return false;
+    if(MOUNT_DEF.some(m=>Math.hypot(fx-m.x,fy-m.y)<m.s*.09)) return false;
+    for(const m of MUSHROOMS) if(Math.hypot((fx-m.fx)*WW,(fy-m.fy)*WH)<mSep) return false;
+    return true;
+  };
+  for(let tries=0; MUSHROOMS.length<nS && tries<3000; tries++){
+    let fx,fy;
+    if(TREES.length && sr()<0.78){
+      const tr=TREES[(sr()*TREES.length)|0], sz=treeSz*tr.m;
+      const a=Math.PI*(0.12+sr()*0.76);   // downward arc → in front of the tree
+      const d=sz*(0.55+sr()*0.85);        // just outside trunk, under the canopy
+      fx=clamp(tr.x+Math.cos(a)*d/WW,0.03,0.97);
+      fy=clamp(tr.y+Math.sin(a)*d/WH,0.05,0.95);
+    } else {
+      fx=0.04+sr()*0.92; fy=0.06+sr()*0.9;
+    }
+    if(spotOK(fx,fy)) MUSHROOMS.push({fx,fy,collected:false,pickT:0});
+  }
   COLLIDERS = [
     ...WATER_DEF.map(w => ({fx:w.x, fy:w.y, fr:Math.max(w.rx,w.ry)*1.05})),
     ...MOUNT_DEF.map(m => ({fx:m.x, fy:m.y, fr:m.s*.075})),
   ];
+  buildTreeGrid();
   document.getElementById('tot').textContent = MUSHROOMS.length;
 }
 
@@ -291,6 +334,9 @@ let collected=0, gameWon=false, gameTime=0;
 let PICK_SPARKS=[];
 const SPARK_PAL=[[200,22,22],[218,170,20],[255,240,170],[255,255,255]];
 const SPEED=260, CHAR_R=14, PICK_R=38, PICK_ANIM_DUR=0.40;
+// Trees use a smaller collision pad than walls/water so the character can
+// shoulder past trunks in dense stands instead of wedging between them.
+const TREE_PAD=7;
 
 function findStart() {
   const r = mkRng(mapNum * 7331 + 17);
@@ -335,9 +381,31 @@ function inputDir() {
 }
 
 // ── Collision ─────────────────────────────────────────────────
+// Trees are solid trunks. With ~2k of them, brute-forcing every collider per
+// move would be wasteful, so trunks live in a uniform spatial grid and only the
+// 3×3 cells around the target position are tested. TREE_CELL is sized larger
+// than the worst-case trunk reach so neighbours can't be missed.
+function buildTreeGrid(){
+  TREE_CELL=Math.max(48,treeSz*1.6);
+  TREE_GRID=new Map();
+  for(const tr of TREES){
+    const wx=tr.x*WW, wy=tr.y*WH, cr=Math.max(2,treeSz*tr.m*0.07);
+    const gx=(wx/TREE_CELL)|0, gy=(wy/TREE_CELL)|0, k=gx+','+gy;
+    let arr=TREE_GRID.get(k); if(!arr){arr=[];TREE_GRID.set(k,arr);}
+    arr.push({wx,wy,cr});
+  }
+}
 function blocked(nx,ny) {
   for(const c of COLLIDERS)
     if(Math.hypot(nx-c.fx*WW,ny-c.fy*WH)<c.fr*Math.min(WW,WH)+CHAR_R) return true;
+  if(TREE_GRID){
+    const gx=(nx/TREE_CELL)|0, gy=(ny/TREE_CELL)|0;
+    for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
+      const arr=TREE_GRID.get((gx+ox)+','+(gy+oy)); if(!arr) continue;
+      for(const t of arr)
+        if(Math.hypot(nx-t.wx,ny-t.wy)<t.cr+TREE_PAD) return true;
+    }
+  }
   return false;
 }
 
