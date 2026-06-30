@@ -132,6 +132,7 @@ const T_GRASS=0, T_SAND=1, T_MARSH=2, T_ROCK=3, T_GRAVEL=4;
 const TR_DECIDUOUS=0, TR_PINE=1, TR_SPRUCE=2, TR_FIR=3, TR_SCOTS=4;
 const U_BILBERRY=0, U_LINGONBERRY=1, U_FERN=2, U_MOSS=3, U_GRASS_TUFT=4;
 const WORLD_SCALE=7; // world is WORLD_SCALE × viewport size
+const NUM_VARIANTS=8; // shape variants per tree species+size
 
 // ── World data ────────────────────────────────────────────────
 let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], SHROOM_POS=[], TERRAIN_ZONES=[];
@@ -231,6 +232,9 @@ function buildWorld() {
   for(let i=0;i<200;i++) TREES.push({x:r(),y:r(),t:TR_FIR,m:0.7+r()*.8});
   for(let i=0;i<110;i++) TREES.push({x:r()*.38,y:.52+r()*.42,t:TR_FIR,m:0.9+r()*.9});
   for(let i=0;i<140;i++) TREES.push({x:r(),y:r(),t:TR_SCOTS,m:0.9+r()*.9});
+  // Assign shape variant per tree (separate RNG so positions are unaffected)
+  const rv=mkRng(mapNum*3007+99);
+  TREES.forEach(tr=>tr.v=(rv()*NUM_VARIANTS)|0);
   // Remap tree species and thin density based on terrain
   const TERRAIN_TREE_CFG={
     [T_SAND]:  {keep:0.35,pool:[TR_SCOTS,TR_SCOTS,TR_SCOTS,TR_SPRUCE]},
@@ -409,6 +413,40 @@ function b4(x,y){return BAYER4[(y&3)*4+(x&3)];}
 function hex2rgb(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];}
 function mkPalRGB(a){return a.map(hex2rgb);}
 
+// ── Tree species palettes (darkest→brightest) ─────────────────
+const PAL_DECIDUOUS=mkPalRGB([
+  '#040b02','#091508','#122010','#1d2e18',
+  '#293c20','#354e2a','#426035','#507642',
+  '#608e52','#72a464','#86bc78','#9cd08a', // light yellow-green (birch)
+]);
+const PAL_PINE=mkPalRGB([
+  '#050c08','#0b1a12','#12261c','#1a3226',
+  '#234030','#2d503c','#396248','#467454', // medium blue-green
+]);
+const PAL_SPRUCE=mkPalRGB([
+  '#020709','#050f10','#0a1a18','#0f2420',
+  '#152e28','#1c3a32','#24483e','#2c584a', // dark blue-green (darkest species)
+]);
+const PAL_FIR=mkPalRGB([
+  '#060f04','#0e1e08','#172c0e','#233a16',
+  '#2f4a20','#3c5e2c','#4a7238','#5a8644', // warm mid-green
+]);
+const PAL_SCOTS_CROWN=mkPalRGB([
+  '#060e0c','#0e1e18','#172e24','#233c30',
+  '#304e3e','#3e624c','#4d765c','#5d8a6c', // grey-green (scots pine)
+]);
+// Trunk / stem colour constants [R,G,B]
+const CLR_TRUNK_BASE =[58,30,8];   // deciduous base/root
+const CLR_TRUNK_LIT  =[126,80,34]; // deciduous trunk lit face
+const CLR_TRUNK_SHAD =[74,44,16];  // deciduous trunk shadow face
+const CLR_TRUNK_BARK =[46,24,8];   // deciduous bark marks
+const CLR_SCOTS_LIT  =[122,74,30]; // scots pine trunk lit (orange)
+const CLR_SCOTS_SHAD =[74,46,12];  // scots pine trunk shadow
+const CLR_SCOTS_BARK =[44,24,8];   // scots pine bark marks
+const CLR_SCOTS_BASE =[62,32,8];   // scots pine base flare
+const CLR_PINE_STEM  =[20,36,12];  // spruce/pine thin stem lit
+const CLR_PINE_SHAD  =[7,15,5];    // spruce/pine thin stem shadow
+
 // Write one opaque pixel (bounds-checked)
 function ibSet(buf,W,H,x,y,r,g,b){
   if(x<0||y<0||x>=W||y>=H)return;
@@ -474,28 +512,41 @@ function ibCRow(buf,W,H,cx,y,hw,palRGB){
   if(b4(cx+hiw+1,y)>11) ibSet(buf,W,H,cx+hiw+1,y,...palRGB[Math.max(0,(n*.18)|0)]);
 }
 
-// ── Deciduous oak sprite ──────────────────────────────────────
-// 4-layer lobe soup using ibSphere (per-pixel Bayer-dithered spheres).
-// No base fill — silhouette defined entirely by outer-ring lobes at
-// 60–108% of r. Each lobe is independently sphere-shaded → organic 3D.
-function makeDecidSpr(r){
+// Adds ibSphere branch-tip lobes at each conifer tier's outer edge,
+// breaking the perfect triangle silhouette with organic protrusions.
+function addBranchTips(buf,W,H,cx,baseY,R,pal,rng){
+  if(R<6) return;
+  const nPairs=2+(rng()*2)|0;
+  for(let b=0;b<nPairs;b++){
+    for(const side of [-1,1]){
+      const frac=0.15+rng()*.70;
+      const bRow=(frac*R)|0;
+      const edgeX=R*(1-bRow/R);
+      const ext=R*(0.10+rng()*.14);
+      const bx=(cx+side*(edgeX+ext))|0;
+      const by=(baseY-bRow)|0;
+      const br=Math.max(2,(R*(0.07+rng()*.07))|0);
+      ibSphere(buf,W,H,bx,by,br,pal.slice(0,Math.max(2,(pal.length*.6)|0)));
+    }
+  }
+}
+
+// ── Deciduous oak/birch sprite ────────────────────────────────
+// 4-layer lobe soup. Variant seeds RNG for distinct per-tree shapes.
+function makeDecidSpr(r,variant=0){
   const W=(r*3+8)|0, H=(r*4+10)|0;
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   const c=cv.getContext('2d');
   const cx=(W>>1), cy=H-3, cY=cy-(r*.68)|0;
 
-  const palRGB=mkPalRGB([
-    '#040c03','#080f05','#0d1a08','#152308',
-    '#1e3212','#273f18','#315120','#3d6328',
-    '#4a7730','#579038','#66a040','#76b04a',
-  ]);
+  const palRGB=PAL_DECIDUOUS;
 
   const id=c.createImageData(W,H);
   const buf=id.data;
 
   ibShadEllipse(buf,W,H,cx+(r*.18)|0,cy+2,(r*.82)|0,(r*.26)|0);
 
-  const rng=mkRng(r*8191+1009);
+  const rng=mkRng(r*8191+1009+variant*997);
 
   // Layer 1 — back/interior (darkest palette range)
   for(let i=0;i<8;i++){
@@ -536,13 +587,13 @@ function makeDecidSpr(r){
 
   // Trunk (drawn last so it appears on top)
   const tw=Math.max(2,(r*.16)|0),th=Math.max(4,(r*.65)|0);
-  ibRect(buf,W,H,cx-tw-3,cy-4,4,6,[58,30,8]);
-  ibRect(buf,W,H,cx+tw-1,cy-4,4,6,[58,30,8]);
-  ibRect(buf,W,H,cx-tw,cy-th,tw,th,[126,80,34]);
-  ibRect(buf,W,H,cx,cy-th,tw,th,[74,44,16]);
+  ibRect(buf,W,H,cx-tw-3,cy-4,4,6,CLR_TRUNK_BASE);
+  ibRect(buf,W,H,cx+tw-1,cy-4,4,6,CLR_TRUNK_BASE);
+  ibRect(buf,W,H,cx-tw,cy-th,tw,th,CLR_TRUNK_LIT);
+  ibRect(buf,W,H,cx,cy-th,tw,th,CLR_TRUNK_SHAD);
   for(let by=3;by<th-2;by+=4){
-    ibSet(buf,W,H,cx-tw+1,cy-th+by,46,24,8);
-    ibSet(buf,W,H,cx+1,cy-th+by,46,24,8);
+    ibSet(buf,W,H,cx-tw+1,cy-th+by,...CLR_TRUNK_BARK);
+    ibSet(buf,W,H,cx+1,cy-th+by,...CLR_TRUNK_BARK);
   }
 
   c.putImageData(id,0,0);
@@ -550,32 +601,34 @@ function makeDecidSpr(r){
 }
 
 // ── Norway pine sprite ────────────────────────────────────────
-// 3 tiers. Each tier rendered row-by-row with ibCRow (Bayer-shaded
-// left-lit/right-shadow), plus needle-droop rows below tier base.
-function makePineSpr(r){
-  const W=(r*2+14)|0, H=(r*4+12)|0;
+// 3 tiers of ibCRow + branch tips breaking the triangle silhouette.
+function makePineSpr(r,variant=0){
+  const W=(r*2+18)|0, H=(r*4+12)|0;
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   const c=cv.getContext('2d');
   const cx=(W>>1), cy=H-3;
-  const palRGB=mkPalRGB(['#070f05','#0d1a08','#14240c','#1c3012','#253e18','#2f4e20','#3a6028','#477030']);
+  const palRGB=PAL_PINE;
   const id=c.createImageData(W,H);
   const buf=id.data;
-  ibShadEllipse(buf,W,H,cx,cy+1,(r*.58)|0,(r*.18)|0,100);
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.58)|0,(r*.18)|0);
   const th=(r*.5)|0;
-  ibRect(buf,W,H,cx-1,cy-th,2,th,[20,36,12]);
-  ibRect(buf,W,H,cx,cy-th,1,th,[7,15,5]);
+  ibRect(buf,W,H,cx-1,cy-th,2,th,CLR_PINE_STEM);
+  ibRect(buf,W,H,cx,cy-th,1,th,CLR_PINE_SHAD);
+  const R0=r, R1=(r*.70)|0, R2=(r*.44)|0;
+  const b0=cy, b1=b0-R0, b2=b1-R1;
   const tiers=[
-    {R:r,          baseY:cy,              off:0},
-    {R:(r*.70)|0,  baseY:cy-r,            off:1},
-    {R:(r*.44)|0,  baseY:(cy-r*1.82)|0,   off:2},
+    {R:R0, baseY:b0, off:0},
+    {R:R1, baseY:b1, off:1},
+    {R:R2, baseY:b2, off:2},
   ];
-  tiers.forEach(({R,baseY,off})=>{
+  tiers.forEach(({R,baseY,off},ti)=>{
     if(R<3)return;
     const pal=palRGB.slice(off,off+6);
     for(let row=0;row<R;row++)
       ibCRow(buf,W,H,cx,baseY-row,R*(1-row/R),pal);
     for(let e=1;e<=3;e++)
       ibCRow(buf,W,H,cx,baseY+e,Math.max(1,R*(0.92-e*.18)),pal.slice(0,Math.max(2,5-e)));
+    addBranchTips(buf,W,H,cx,baseY,R,pal,mkRng(r*1337+ti*97+variant*503));
   });
   const t2=tiers[2];
   ibSphere(buf,W,H,cx,(t2.baseY-t2.R-2)|0,Math.max(3,(r*.11)|0),palRGB.slice(4));
@@ -584,32 +637,34 @@ function makePineSpr(r){
 }
 
 // ── Tall spruce sprite ────────────────────────────────────────
-// 5 tiers, each ibCRow-rendered. Progressively brighter palette
-// for higher tiers. Tip spike drawn into buffer.
-function makeSpruSpr(r){
-  const W=(r*2+12)|0, H=(r*5+12)|0;
+// 5 tiers, ibCRow + branch tips. Very dark blue-green palette.
+function makeSpruSpr(r,variant=0){
+  const W=(r*2+18)|0, H=(r*4+12)|0;
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   const c=cv.getContext('2d');
   const cx=(W>>1), cy=H-3;
-  const palRGB=mkPalRGB(['#050e06','#0a1a0c','#112614','#19321c','#224026','#2c4e30','#375e3a','#436e44']);
+  const palRGB=PAL_SPRUCE;
   const id=c.createImageData(W,H);
   const buf=id.data;
-  ibShadEllipse(buf,W,H,cx,cy+1,(r*.45)|0,(r*.14)|0,90);
-  ibRect(buf,W,H,cx-1,cy-(r*.32)|0,2,(r*.32)|0,palRGB[1]);
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.45)|0,(r*.14)|0);
+  ibRect(buf,W,H,cx-1,cy-(r*.32)|0,2,(r*.32)|0,CLR_PINE_STEM);
+  const R0=r, R1=(r*.76)|0, R2=(r*.57)|0, R3=(r*.40)|0, R4=(r*.24)|0;
+  const b0=cy, b1=b0-R0, b2=b1-R1, b3=b2-R2, b4=b3-R3;
   const tiers=[
-    {R:r,          baseY:cy,             off:0},
-    {R:(r*.76)|0,  baseY:(cy-r*.80)|0,   off:1},
-    {R:(r*.57)|0,  baseY:(cy-r*1.62)|0,  off:2},
-    {R:(r*.40)|0,  baseY:(cy-r*2.48)|0,  off:3},
-    {R:(r*.24)|0,  baseY:(cy-r*3.38)|0,  off:3},
+    {R:R0, baseY:b0, off:0},
+    {R:R1, baseY:b1, off:1},
+    {R:R2, baseY:b2, off:2},
+    {R:R3, baseY:b3, off:3},
+    {R:R4, baseY:b4, off:3},
   ];
-  tiers.forEach(({R,baseY,off})=>{
+  tiers.forEach(({R,baseY,off},ti)=>{
     if(R<2)return;
     const pal=palRGB.slice(off,off+5);
     for(let row=0;row<R;row++)
       ibCRow(buf,W,H,cx,baseY-row,R*(1-row/R),pal);
     for(let e=1;e<=2;e++)
       ibCRow(buf,W,H,cx,baseY+e,Math.max(1,R*(0.90-e*.20)),pal.slice(0,Math.max(2,4-e)));
+    addBranchTips(buf,W,H,cx,baseY,R,pal,mkRng(r*1337+ti*97+variant*503));
   });
   const t4=tiers[4];
   for(let sk=0;sk<Math.max(3,(r*.30)|0);sk++) ibSet(buf,W,H,cx,(t4.baseY-t4.R-sk)|0,...palRGB[4]);
@@ -618,30 +673,30 @@ function makeSpruSpr(r){
 }
 
 // ── Broad drooping fir sprite ─────────────────────────────────
-// 3 wide tiers with ibCRow. 5 droop rows per tier for signature
-// pendulous branch tips. Palette warmer green.
-function makeFirSpr(r){
-  const W=(r*2+16)|0, H=(r*3+14)|0;
+// 3 wide tiers, heavy droop rows, branch tips. Warm mid-green palette.
+function makeFirSpr(r,variant=0){
+  const W=(r*2+20)|0, H=(r*3+14)|0;
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   const c=cv.getContext('2d');
   const cx=(W>>1), cy=H-3;
-  const palRGB=mkPalRGB(['#060d04','#0e1c08','#16280e','#1e3614','#274618','#315820','#3c6a28','#497c30']);
+  const palRGB=PAL_FIR;
   const id=c.createImageData(W,H);
   const buf=id.data;
-  ibShadEllipse(buf,W,H,cx,cy+1,(r*.72)|0,(r*.22)|0,100);
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.72)|0,(r*.22)|0);
   ibRect(buf,W,H,cx-1,cy-(r*.40)|0,2,(r*.40)|0,palRGB[1]);
   const tiers=[
     {R:r,          baseY:cy,             off:0},
     {R:(r*.82)|0,  baseY:(cy-r*.76)|0,   off:1},
     {R:(r*.60)|0,  baseY:(cy-r*1.56)|0,  off:2},
   ];
-  tiers.forEach(({R,baseY,off})=>{
+  tiers.forEach(({R,baseY,off},ti)=>{
     if(R<3)return;
     const pal=palRGB.slice(off,off+6);
     for(let row=0;row<R;row++)
       ibCRow(buf,W,H,cx,baseY-row,R*(1-row/R),pal);
     for(let e=1;e<=5;e++)
       ibCRow(buf,W,H,cx,baseY+e,Math.max(1,R*(0.95-e*.12)),pal.slice(0,Math.max(2,5-e)));
+    addBranchTips(buf,W,H,cx,baseY,R,pal,mkRng(r*1337+ti*97+variant*503));
   });
   const t2=tiers[2];
   for(let sk=0;sk<Math.max(2,(r*.42)|0);sk++) ibSet(buf,W,H,cx,(t2.baseY-t2.R-sk)|0,...palRGB[5]);
@@ -650,37 +705,43 @@ function makeFirSpr(r){
 }
 
 // ── Scots pine sprite ─────────────────────────────────────────
-// Tall tapered orange trunk + flat umbrella crown of ibSphere lobes.
-function makeScotsSpr(r){
+// Tall orange trunk + umbrella crown. Variant adds extra crown lobes.
+function makeScotsSpr(r,variant=0){
   const tH=(r*2.6)|0;
   const W=(r*3+10)|0, H=(tH+r*1.8+10)|0;
   const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
   const c=cv.getContext('2d');
   const cx=(W>>1), cy=H-3;
-  const crownPal=mkPalRGB(['#080e06','#101a0c','#192814','#24381c','#304826','#3c5830','#486838','#567840']);
+  const crownPal=PAL_SCOTS_CROWN;
   const id=c.createImageData(W,H);
   const buf=id.data;
-  ibShadEllipse(buf,W,H,cx,cy+1,(r*.62)|0,(r*.18)|0,90);
-  // Tapered trunk
+  ibShadEllipse(buf,W,H,cx,cy+1,(r*.62)|0,(r*.18)|0);
   const tw=Math.max(2,(r*.20)|0);
   for(let row=0;row<tH;row++){
     const t=row/tH, w2=tw+(t<.15?(1-t/.15)*2|0:0);
-    ibRect(buf,W,H,cx-w2,cy-row,w2,1,[122,74,30]);
-    ibRect(buf,W,H,cx,cy-row,tw,1,[74,46,12]);
+    ibRect(buf,W,H,cx-w2,cy-row,w2,1,CLR_SCOTS_LIT);
+    ibRect(buf,W,H,cx,cy-row,tw,1,CLR_SCOTS_SHAD);
   }
   for(let by=5;by<tH-5;by+=7){
-    ibSet(buf,W,H,cx-tw+1,cy-by,44,24,8);
-    ibSet(buf,W,H,cx+1,cy-by,44,24,8);
+    ibSet(buf,W,H,cx-tw+1,cy-by,...CLR_SCOTS_BARK);
+    ibSet(buf,W,H,cx+1,cy-by,...CLR_SCOTS_BARK);
   }
-  ibRect(buf,W,H,cx-tw-2,cy-5,4,6,[62,32,8]);
-  ibRect(buf,W,H,cx+tw-1,cy-5,4,6,[62,32,8]);
-  // Flat umbrella crown: 3 ibSphere lobes
-  const crownY=(cy-tH-(r*.55))|0;
-  [
+  ibRect(buf,W,H,cx-tw-2,cy-5,4,6,CLR_SCOTS_BASE);
+  ibRect(buf,W,H,cx+tw-1,cy-5,4,6,CLR_SCOTS_BASE);
+  // Umbrella crown: 3 base lobes + variant-driven extras
+  const crownY=(cy-tH-(r*.25))|0;
+  const crng=mkRng(r*4217+variant*881);
+  const lobes=[
     {lx:cx-(r*.52)|0, ly:crownY,           sr:(r*.62)|0},
     {lx:cx+(r*.52)|0, ly:crownY,           sr:(r*.62)|0},
     {lx:cx,           ly:crownY-(r*.10)|0, sr:(r*.52)|0},
-  ].forEach(({lx,ly,sr})=>ibSphere(buf,W,H,lx,ly,sr,crownPal));
+  ];
+  for(let i=0;i<2+((crng()*3)|0);i++){
+    const a=crng()*Math.PI*2, d=r*(0.20+crng()*.50);
+    lobes.push({lx:(cx+Math.cos(a)*d)|0,ly:(crownY+Math.sin(a)*d*.55)|0,
+                sr:Math.max(4,(r*(0.32+crng()*.22))|0)});
+  }
+  lobes.forEach(({lx,ly,sr})=>ibSphere(buf,W,H,lx,ly,sr,crownPal));
   c.putImageData(id,0,0);
   return {cv,ox:cx,oy:cy};
 }
@@ -725,15 +786,15 @@ function makeShrubSpr(r){
 }
 
 // ── Sprite lazy cache ─────────────────────────────────────────
-function getTreeSpr(type,r){
+function getTreeSpr(type,r,variant=0){
   const rr=Math.max(4,Math.round(r/4)*4);
-  const key=type+'_'+rr;
+  const key=type+'_'+rr+'_'+variant;
   if(!SP[key]) SP[key]=
-    type===TR_DECIDUOUS?makeDecidSpr(rr):
-    type===TR_PINE     ?makePineSpr(rr):
-    type===TR_SPRUCE   ?makeSpruSpr(rr):
-    type===TR_FIR      ?makeFirSpr(rr):
-             makeScotsSpr(rr);
+    type===TR_DECIDUOUS?makeDecidSpr(rr,variant):
+    type===TR_PINE     ?makePineSpr(rr,variant):
+    type===TR_SPRUCE   ?makeSpruSpr(rr,variant):
+    type===TR_FIR      ?makeFirSpr(rr,variant):
+                        makeScotsSpr(rr,variant);
   return SP[key];
 }
 function getShrubSpr(r){
@@ -1029,30 +1090,30 @@ function drawHill(m){
 }
 
 // ── Tree draw (sprite blit) ───────────────────────────────────
-function drawRoundTree(wx,wy,sz){
+function drawRoundTree(wx,wy,sz,v=0){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r*2<0||x-r*2>pixW||y+r<0||y-r*4>pixH) return;
-  const s=getTreeSpr(TR_DECIDUOUS,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_DECIDUOUS,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
-function drawPineTree(wx,wy,sz){
+function drawPineTree(wx,wy,sz,v=0){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r<0||x-r>pixW||y<0||y-r*4>pixH) return;
-  const s=getTreeSpr(TR_PINE,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_PINE,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
-function drawSpruce(wx,wy,sz){
+function drawSpruce(wx,wy,sz,v=0){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz*.72/PS)|0);
   if(x+r+2<0||x-r-2>pixW||y<0||y-r*5>pixH) return;
-  const s=getTreeSpr(TR_SPRUCE,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_SPRUCE,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
-function drawBroadFir(wx,wy,sz){
+function drawBroadFir(wx,wy,sz,v=0){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz*1.10/PS)|0);
   if(x+r+3<0||x-r-3>pixW||y<0||y-r*3>pixH) return;
-  const s=getTreeSpr(TR_FIR,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_FIR,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
-function drawScotsPine(wx,wy,sz){
+function drawScotsPine(wx,wy,sz,v=0){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r*2<0||x-r*2>pixW||y<0||y-r*5>pixH) return;
-  const s=getTreeSpr(TR_SCOTS,r); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_SCOTS,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
 }
 
 // ── Shrub ─────────────────────────────────────────────────────
@@ -1271,11 +1332,11 @@ function drawVegetation(){
     if(tx>x0&&tx<x1&&ty>y0&&ty<y1){
       const sz=treeSz*tr.m;
       items.push({wy:ty,fn:
-        tr.t===TR_DECIDUOUS?()=>drawRoundTree(tx,ty,sz):
-        tr.t===TR_PINE     ?()=>drawPineTree(tx,ty,sz):
-        tr.t===TR_SPRUCE   ?()=>drawSpruce(tx,ty,sz):
-        tr.t===TR_FIR      ?()=>drawBroadFir(tx,ty,sz):
-                            ()=>drawScotsPine(tx,ty,sz)});
+        tr.t===TR_DECIDUOUS?()=>drawRoundTree(tx,ty,sz,tr.v):
+        tr.t===TR_PINE     ?()=>drawPineTree(tx,ty,sz,tr.v):
+        tr.t===TR_SPRUCE   ?()=>drawSpruce(tx,ty,sz,tr.v):
+        tr.t===TR_FIR      ?()=>drawBroadFir(tx,ty,sz,tr.v):
+                            ()=>drawScotsPine(tx,ty,sz,tr.v)});
     }
   });
   items.sort((a,b)=>a.wy-b.wy);
