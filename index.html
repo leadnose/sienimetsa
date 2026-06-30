@@ -215,16 +215,16 @@ function buildWorld() {
   const mCX = MOUNT_DEF.reduce((s,m)=>s+m.x,0)/MOUNT_DEF.length;
   const mCY = MOUNT_DEF.reduce((s,m)=>s+m.y,0)/MOUNT_DEF.length;
   TREES = [];
-  for(let i=0;i<600;i++) TREES.push({x:r()*.42,y:.50+r()*.48,t:TR_DECIDUOUS,m:0.8+r()*.5});
-  for(let i=0;i<300;i++) TREES.push({x:clamp(mCX-.15+r()*.30,0,1),y:r()*.55,t:TR_PINE,m:0.8+r()*.4});
-  for(let i=0;i<180;i++) TREES.push({x:clamp(mCX+r()*.40,0,1),y:clamp(mCY+r()*.35,0,.55),t:TR_PINE,m:0.7+r()*.5});
-  for(let i=0;i<450;i++) TREES.push({x:r(),y:r(),t:r()>.45?TR_PINE:TR_DECIDUOUS,m:0.7+r()*.6});
-  for(let i=0;i<220;i++) TREES.push({x:r()*.44,y:r()*.58,t:TR_SPRUCE,m:0.7+r()*1.1});
-  for(let i=0;i<180;i++) TREES.push({x:clamp(mCX-.1+r()*.45,0,1),y:r()*.48,t:TR_SPRUCE,m:0.8+r()*1.0});
-  for(let i=0;i<130;i++) TREES.push({x:r(),y:r(),t:TR_SPRUCE,m:0.5+r()*1.2});
-  for(let i=0;i<200;i++) TREES.push({x:r(),y:r(),t:TR_FIR,m:0.7+r()*.8});
-  for(let i=0;i<110;i++) TREES.push({x:r()*.38,y:.52+r()*.42,t:TR_FIR,m:0.9+r()*.9});
-  for(let i=0;i<140;i++) TREES.push({x:r(),y:r(),t:TR_SCOTS,m:0.9+r()*.9});
+  for(let i=0;i<1000;i++) TREES.push({x:r()*.42,y:.50+r()*.48,t:TR_DECIDUOUS,m:0.8+r()*.5});
+  for(let i=0;i<480;i++) TREES.push({x:clamp(mCX-.15+r()*.30,0,1),y:r()*.55,t:TR_PINE,m:0.8+r()*.4});
+  for(let i=0;i<300;i++) TREES.push({x:clamp(mCX+r()*.40,0,1),y:clamp(mCY+r()*.35,0,.55),t:TR_PINE,m:0.7+r()*.5});
+  for(let i=0;i<750;i++) TREES.push({x:r(),y:r(),t:r()>.45?TR_PINE:TR_DECIDUOUS,m:0.7+r()*.6});
+  for(let i=0;i<360;i++) TREES.push({x:r()*.44,y:r()*.58,t:TR_SPRUCE,m:0.7+r()*1.1});
+  for(let i=0;i<300;i++) TREES.push({x:clamp(mCX-.1+r()*.45,0,1),y:r()*.48,t:TR_SPRUCE,m:0.8+r()*1.0});
+  for(let i=0;i<220;i++) TREES.push({x:r(),y:r(),t:TR_SPRUCE,m:0.5+r()*1.2});
+  for(let i=0;i<340;i++) TREES.push({x:r(),y:r(),t:TR_FIR,m:0.7+r()*.8});
+  for(let i=0;i<180;i++) TREES.push({x:r()*.38,y:.52+r()*.42,t:TR_FIR,m:0.9+r()*.9});
+  for(let i=0;i<230;i++) TREES.push({x:r(),y:r(),t:TR_SCOTS,m:0.9+r()*.9});
   // Assign shape variant per tree (separate RNG so positions are unaffected)
   const rv=mkRng(mapNum*3007+99);
   TREES.forEach(tr=>tr.v=(rv()*NUM_VARIANTS)|0);
