@@ -518,9 +518,11 @@ function buildWorld() {
     }
     if(spotOK(fx,fy)) MUSHROOMS.push({fx,fy,collected:false,pickT:0});
   }
+  // The gnome can wade into a pond up to WATER_MAX_DEPTH before being
+  // stopped — so the collider is a *shrunken* ellipse around the deep
+  // centre, not the pond's full shore-to-shore extent.
   COLLIDERS = [
-    ...WATER_DEF.map(w => ({fx:w.x, fy:w.y, fr:Math.max(w.rx,w.ry)*1.05})),
-    ...MOUNT_DEF.map(m => ({fx:m.x, fy:m.y, fr:m.s*.075})),
+    ...WATER_DEF.map(w => ({fx:w.x, fy:w.y, frx:w.rx*(1-WATER_MAX_DEPTH), fry:w.ry*(1-WATER_MAX_DEPTH)})),
   ];
   buildTreeGrid();
   document.getElementById('tot').textContent = MUSHROOMS.length;
@@ -533,6 +535,9 @@ let collected=0, gameWon=false, gameTime=0;
 let PICK_SPARKS=[];
 const SPARK_PAL=[[200,22,22],[218,170,20],[255,240,170],[255,255,255]];
 const SPEED=260, CHAR_R=14, PICK_R=38, PICK_ANIM_DUR=0.40;
+// How far into a pond the gnome can wade — 0 = shore, 1 = dead centre.
+// At the cap he's chest-deep; drawGnome() submerges the body to match.
+const WATER_MAX_DEPTH=0.72;
 // Trees use a smaller collision pad than walls/water so the character can
 // shoulder past trunks in dense stands instead of wedging between them.
 const TREE_PAD=7;
@@ -602,8 +607,14 @@ function buildTreeGrid(){
   }
 }
 function blocked(nx,ny) {
-  for(const c of COLLIDERS)
-    if(Math.hypot(nx-c.fx*WW,ny-c.fy*WH)<c.fr*Math.min(WW,WH)+CHAR_R) return true;
+  // Ponds are ellipses (rx,ry independently scaled by WW,WH — see drawWater),
+  // often quite elongated. A circular collider sized off the larger radius
+  // used to block a stretch of clear ground alongside the narrow axis; check
+  // the actual ellipse (per-axis, CHAR_R-padded) instead.
+  for(const c of COLLIDERS){
+    const ex=(nx-c.fx*WW)/(c.frx*WW+CHAR_R), ey=(ny-c.fy*WH)/(c.fry*WH+CHAR_R);
+    if(ex*ex+ey*ey<1) return true;
+  }
   if(TREE_GRID){
     const gx=(nx/TREE_CELL)|0, gy=(ny/TREE_CELL)|0;
     for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
@@ -613,6 +624,33 @@ function blocked(nx,ny) {
     }
   }
   return false;
+}
+// Mountains don't block movement — they slow it, like climbing a slope.
+// The footprint is an ellipse anchored at the mountain's base (m.x,m.y)
+// and extending only upward, matching how drawHill's silhouette is
+// anchored (rows drawn from the base up), not a circle around the base.
+function onMountainAt(x,y){
+  for(const m of MOUNT_DEF){
+    const mx=m.x*WW, my=m.y*WH;
+    if(y>my+CHAR_R) continue;
+    const rw=m.s*Math.min(WW,WH)*.20, rh=m.s*Math.min(WW,WH)*.16;
+    const nx=(x-mx)/rw, ny=Math.max(0,my-y)/rh;
+    if(nx*nx+ny*ny<1) return true;
+  }
+  return false;
+}
+// How deep into a pond a world point is: 0 at the shore, 1 at dead centre
+// (mirrors the depth falloff drawWater uses for its shading). Shared by
+// the movement slowdown and drawGnome's waterline clipping so wading in
+// looks exactly as deep as it plays.
+function waterDepthAt(x,y){
+  let best=0;
+  for(const w of WATER_DEF){
+    const dx=(x-w.x*WW)/(w.rx*WW), dy=(y-w.y*WH)/(w.ry*WH);
+    const d=1-Math.hypot(dx,dy);
+    if(d>best) best=d;
+  }
+  return best;
 }
 
 // ── Audio ─────────────────────────────────────────────────────
@@ -1376,63 +1414,170 @@ function drawWater(w,wi){
 function drawWaters(){ WATER_DEF.forEach((w,i)=>drawWater(w,i)); }
 
 // ── Mountains ─────────────────────────────────────────────────
-function drawHill(m){
-  const cx=wpx(m.x*WW), cy=wpy(m.y*WH);
-  const w=(m.s*Math.min(WW,WH)*.20/PS)|0, h=(m.s*Math.min(WW,WH)*.16/PS)|0;
-  if(cx+w<0||cx-w>pixW||cy<0||cy-h>pixH) return;
+// A mountain is 2-4 overlapping rounded sub-peaks (same idea as trees
+// compositing several ibSphere lobes) so the ridge reads as a connected
+// rocky massif with a jagged skyline, not one smooth parabola. Rock is
+// shaded per-pixel — elevation + upper-left diffuse light + coarse-sampled
+// hash noise — picked from one continuous palette with Bayer dithering.
+// Coarse-sampling the noise (every ~4px) gives blotchy mineral grain
+// instead of the fine 4x4 Bayer tile reading as a visible checkerboard.
+// A wide scree skirt below the jagged foot line thins into transparency so
+// the rock dissolves into the ground instead of sitting on a shadow bar.
+const PAL_ROCK=mkPalRGB([
+  '#241a12','#332419','#422e20','#523c28','#624a32','#755a3f',
+  '#8a6c4d','#a0805d','#b6966f','#cbac83','#dcc199','#ecd6b0',
+]);
+const PAL_SNOW=mkPalRGB(['#8a9088','#b2b8ae','#d2d6ca','#e8e8dc','#f8f6ec']);
 
-  // 5-tone rock silhouette
-  for(let row=0;row<=h;row++){
-    const t=row/h;
-    const rw=Math.round(w*(1-t*t*0.9));
-    const col=t>.90?'#d0c2b0':t>.74?'#b09888':t>.52?'#8c7a68':t>.30?'#6a5a48':'#4a3a2c';
-    pr(cx-rw,cy-row,rw*2,1,col);
+function makeHillPeaks(seed,w,h,nPeaks){
+  const rng=mkRng(seed);
+  const peaks=[];
+  for(let i=0;i<nPeaks;i++){
+    const frac=(i+0.5)/nPeaks+(rng()-.5)*0.4/nPeaks;
+    const px=(frac*2-1)*w*0.55;
+    const ph=h*(0.68+rng()*0.32);
+    const pr=w*0.62*(0.85+rng()*0.4);
+    peaks.push({px,ph,pr});
+  }
+  return peaks;
+}
+// Fine piecewise-linear ridge jitter (row units) layered on top of the peaks.
+function makeFineFn(seed,h){
+  const rng=mkRng(seed);
+  const n=22;
+  const pts=[]; for(let i=0;i<=n;i++) pts.push((rng()-.5)*h*0.09);
+  return u=>{
+    const uu=u*n, i0=Math.max(0,Math.min(n-1,uu|0)), f=uu-i0;
+    return pts[i0]*(1-f)+pts[i0+1]*f;
+  };
+}
+// Per-column foot-line jitter (row units) for an irregular ground contact.
+function makeBaseFn(seed,h){
+  const rng=mkRng(seed);
+  const n=16;
+  const pts=[]; for(let i=0;i<=n;i++) pts.push(rng()*h*0.045);
+  return u=>{
+    const uu=u*n, i0=Math.max(0,Math.min(n-1,uu|0)), f=uu-i0;
+    return pts[i0]*(1-f)+pts[i0+1]*f;
+  };
+}
+function hillTopHAt(dx,peaks,fineFn,u){
+  let best=0;
+  for(const p of peaks){
+    const ax=Math.abs(dx-p.px)/p.pr;
+    if(ax>=1) continue;
+    const t=Math.sqrt(Math.max(0,1-ax*ax));
+    if(t*p.ph>best) best=t*p.ph;
+  }
+  return best+fineFn(u);
+}
+// Built once per mountain into an offscreen sprite (like tree sprites) and
+// cached in SP{}, since drawHill() runs every frame but a mountain's shape
+// never changes — avoids paying full per-pixel cost per frame.
+function makeHillSpr(m,w,h){
+  const padTop=Math.max(10,Math.round(h*0.28));
+  const skirt=Math.max(16,Math.min(46,Math.round(h*0.18)));
+  const padX=6;
+  const W=w*2+padX*2, H=h+padTop+skirt+2;
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const id=c.createImageData(W,H);
+  const buf=id.data;
+  const ox=W>>1, oy=H-skirt-2; // anchor: ground contact line
+
+  const nPeaks=2+Math.floor(m.s*2);
+  const peaks=makeHillPeaks(m.x*929+m.y*457|0,w,h,nPeaks);
+  const fineFn=makeFineFn(m.x*613+m.y*811|0,h);
+  const baseFn=makeBaseFn(m.x*271+m.y*613|0,h);
+  const n=PAL_ROCK.length;
+  const seedX=(m.x*4001)|0, seedY=(m.y*4001)|0;
+  const snowLine=m.s>.55?0.72-m.s*0.08:2; // t where snow starts blending in (2=never)
+  let globalTop=1;
+  for(let dx=-w;dx<w;dx++){
+    const gt=hillTopHAt(dx,peaks,fineFn,(dx+w)/(2*w));
+    if(gt>globalTop) globalTop=gt;
   }
 
-  // Geological strata lines
-  for(let row=Math.floor(h*.14);row<Math.floor(h*.82);row+=Math.max(3,Math.floor(h*.10))){
-    const t=row/h, rw=Math.round(w*(1-t*t*.9));
-    pr(cx-rw+2,cy-row,Math.max(2,rw*2-4),1,'#7a6858');
-    // Dither edges of strata
-    if(rw>8){
-      for(let dx=0;dx<4;dx++){
-        pr(cx-rw+dx,cy-row,1,1,((cx-rw+dx+cy-row)&1)?'#7a6858':'#6a5a48');
-        pr(cx+rw-dx-2,cy-row,1,1,((cx+rw-dx+cy-row)&1)?'#7a6858':'#6a5a48');
+  for(let dx=-w;dx<w;dx++){
+    const u=(dx+w)/(2*w);
+    const topH=Math.min(h+padTop-2,Math.max(0,hillTopHAt(dx,peaks,fineFn,u)));
+    const footJag=Math.max(0,Math.min(9,Math.round(baseFn(u))));
+    const slopeLight=0.5-0.5*(dx/w); // 1 at left edge, 0 at right edge
+    const colSeedX=(dx>>2)+seedX;
+
+    for(let row=footJag;row<=topH;row++){
+      const rowT=row/globalTop;
+      const y=oy-row;
+      const bt=b4(ox+dx,y);
+
+      if(snowLine<1 && rowT>snowLine){
+        const snowMix=Math.min(1,(rowT-snowLine)/(1-snowLine)*1.4);
+        if(bt<snowMix*16){
+          const sn=PAL_SNOW.length;
+          const sfi=Math.max(0,Math.min(sn-1-1e-4,(0.35+0.65*slopeLight)*(sn-1)));
+          const si0=sfi|0, spick=(sfi-si0)*16>bt?si0+1:si0;
+          ibSet(buf,W,H,ox+dx,y,...PAL_SNOW[spick]);
+          continue;
+        }
+      }
+
+      const rq=row>>2;
+      const h1=((colSeedX*17)^((rq+seedY)*31))&0xff;
+      const h2=((colSeedX*41)^((rq+seedY)*19))&0xff;
+      const h3=((colSeedX*7)^((rq+seedY)*53))&0xff;
+      const noise=(((h1*140+h2*80+h3*35)>>8)/255-0.5);
+      let shade=0.10+0.42*slopeLight+0.38*rowT+noise*0.55;
+      shade=Math.max(0,Math.min(0.999,shade));
+      const fi=shade*(n-1);
+      const i0=Math.min(n-2,fi|0);
+      const pick=(fi-i0)*16>bt?i0+1:i0;
+      ibSet(buf,W,H,ox+dx,y,...PAL_ROCK[pick]);
+    }
+
+    // Scree skirt: rubble thinning to transparent as it spreads onto the ground
+    for(let row=footJag-1;row>=-skirt;row--){
+      const dist=footJag-row;
+      const prob=Math.max(0,1-dist/skirt)**0.85;
+      const hsh=((colSeedX*53)^((row+seedY)*29))&0xff;
+      const hsh2=((colSeedX*23)^((row+seedY)*61))&0xff;
+      if((hsh/255)>prob) continue;
+      const y=oy-row;
+      if(dist<skirt*0.7&&(hsh&3)===0){
+        ibSet(buf,W,H,ox+dx,y,24,52,10); // moss/grass creeping onto the scree
+      }else if((hsh2&7)===0){
+        ibSet(buf,W,H,ox+dx,y,...PAL_ROCK[0]); // boulder shadow fleck
+      }else{
+        const c2=(hsh&1)?PAL_ROCK[1]:PAL_ROCK[2+((hsh>>2)&1)];
+        ibSet(buf,W,H,ox+dx,y,...c2);
       }
     }
   }
 
-  // Rock face crevices with lit counter-edge
+  // Rock face crevices with lit counter-edge, kept within the silhouette
   const cr=mkRng(m.x*511+m.y*211|0);
-  for(let i=0;i<10+Math.floor(m.s*8);i++){
-    const crx=(cx+(cr()-.5)*w*1.3)|0, cry=(cy-cr()*h*.82)|0;
+  for(let i=0;i<8+Math.floor(m.s*8);i++){
+    const cdx=Math.round((cr()-.5)*w*1.8);
+    const cu=(cdx+w)/(2*w);
+    const cTopH=Math.max(2,hillTopHAt(cdx,peaks,fineFn,cu));
+    const cry=Math.max(2,Math.round(cr()*cTopH*0.85));
+    const crx=ox+cdx, cy0=oy-cry;
     const crl=2+Math.floor(cr()*6);
-    for(let j=0;j<crl;j++)   pr(crx+j,cry-j,1,1,'#2a1810');
-    for(let j=0;j<crl-1;j++) pr(crx+j-1,cry-j+1,1,1,'#9a8878');
+    for(let j=0;j<crl;j++)   ibSet(buf,W,H,crx+j,cy0-j,...PAL_ROCK[0]);
+    for(let j=0;j<crl-1;j++) ibSet(buf,W,H,crx+j-1,cy0-j+1,...PAL_ROCK[7]);
   }
 
-  // Base shadow
-  pr(cx-w,cy,w*2,3,'#2a1810');
-  for(let dx=0;dx<w*2;dx++) if((cx-w+dx+cy)&1) pr(cx-w+dx,cy+3,1,1,'#3a2c20');
-
-  // Snow cap
-  if(m.s>.60){
-    const fr=mkRng(m.x*333+m.y*777|0);
-    const sr=Math.floor(h*.83), st=sr/h;
-    const srw=Math.round(w*(1-st*st*.9));
-    pr(cx-srw,cy-sr,srw*2,1,'#c8c0b0');
-    for(let i=0;i<8+Math.floor(m.s*4);i++){
-      const fx=(cx+(fr()-.5)*srw*.85)|0, fy=(cy-sr-fr()*h*.14)|0;
-      pr(fx,fy,2,1,'#ccc4b2'); pr(fx+1,fy-1,1,1,'#eae4dc');
-    }
-  }
-
-  // Foot scrub
-  const fpr=mkRng(m.x*777+m.y*333|0);
-  for(let i=0;i<5;i++){
-    const fx=(cx+(fpr()-.5)*w*1.6)|0, fy=(cy-fpr()*h*.18)|0;
-    pr(fx,fy,1,1,'#1a3008'); pr(fx+1,fy-1,1,1,'#283018');
-  }
+  c.putImageData(id,0,0);
+  return {cv,ox,oy};
+}
+function drawHill(m){
+  const cx=wpx(m.x*WW), cy=wpy(m.y*WH);
+  const w=(m.s*Math.min(WW,WH)*.20/PS)|0, h=(m.s*Math.min(WW,WH)*.16/PS)|0;
+  if(w<1||h<1) return;
+  if(cx+w<0||cx-w>pixW||cy<0||cy-h>pixH) return;
+  const key='hill_'+m.x+'_'+m.y+'_'+m.s+'_'+w+'_'+h;
+  if(!SP[key]) SP[key]=makeHillSpr(m,w,h);
+  const s=SP[key];
+  pixCtx.drawImage(s.cv,cx-s.ox,cy-s.oy);
 }
 
 // ── Tree draw (sprite blit) ───────────────────────────────────
@@ -1570,16 +1715,27 @@ function drawGnome(wx,wy,t,moving){
   const frame=moving?Math.floor(t*7)%4:0;
   const bob=(frame===1||frame===3)?-1:0;
 
+  // Wading: the deeper into a pond, the more of the body sinks below the
+  // waterline. submerge is in sprite units counted up from the feet (dy=0);
+  // at the capped max depth (~13 units) only the cap/face stay above water.
+  const wd=waterDepthAt(wx,wy);
+  const submerge=wd*13;
+
   // sp: place rect at (dx,dy) units from feet centre, flipping for facing.
   // dx is the left edge in facing-right space; positive dx leans toward facing.
+  // Clipped to the part still above the waterline (dy is negative-up).
   function sp(dx,dy,w,h,c){
+    const visH=Math.min(h,(-submerge)-dy);
+    if(visH<=0) return;
     const x0=f>0?cx+dx*s:cx-(dx+w)*s;
-    pr(x0,(cy+dy*s)+bob,w*s,h*s,c);
+    pr(x0,(cy+dy*s)+bob,w*s,visH*s,c);
   }
 
-  // Ground shadow (wide & stout)
-  const sh=Math.max(1,s>>1);
-  pr(cx-s*4,cy,s*8,sh,'#203808');
+  // Ground shadow (wide & stout) — there's no shadow to cast while wading
+  if(wd<=0){
+    const sh=Math.max(1,s>>1);
+    pr(cx-s*4,cy,s*8,sh,'#203808');
+  }
 
   // Walk: stubby feet alternate a lift; mittens swing opposite
   const lf=frame===1?-1:0, rf=frame===3?-1:0;
@@ -1781,9 +1937,11 @@ function update(dt){
   gameTime+=dt;
   const {dx,dy}=inputDir();
   if(dx!==0) char.facing=dx>0?1:-1;
-  // Trails are quicker going: main > side > faint > off-trail
+  // Trails are quicker going: main > side > faint > off-trail. Mountain
+  // slopes and pond wading are slow going regardless of trail.
   const pc=pathCodeAt(char.x,char.y);
-  const spd=SPEED*(pc===3?1.5:pc===2?1.3:pc===1?1.12:1);
+  const wd=waterDepthAt(char.x,char.y);
+  const spd=SPEED*(wd>0?0.62-0.22*wd:onMountainAt(char.x,char.y)?0.45:pc===3?1.5:pc===2?1.3:pc===1?1.12:1);
   const nx=clamp(char.x+dx*spd*dt,CHAR_R,WW-CHAR_R), ny=clamp(char.y+dy*spd*dt,CHAR_R,WH-CHAR_R);
   if(!blocked(nx,ny)){ char.x=nx; char.y=ny; }
   else { if(!blocked(nx,char.y)) char.x=nx; if(!blocked(char.x,ny)) char.y=ny; }
