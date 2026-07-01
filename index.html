@@ -2,7 +2,7 @@
 <html lang="fi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Sienimetsa 🍄</title>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;}
@@ -10,7 +10,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:#1e2e0e;}
 canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 
 #hud{
-  position:fixed;top:14px;left:14px;z-index:50;
+  position:fixed;top:calc(14px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left));z-index:50;
   background:rgba(255,250,230,.95);border:3px solid #b8860b;
   border-radius:20px;padding:8px 20px;
   font:700 clamp(18px,4.5vw,30px)/1 Georgia,serif;
@@ -18,7 +18,7 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   box-shadow:0 3px 14px rgba(0,0,0,.18);
 }
 #mm-wrap{
-  position:fixed;bottom:14px;right:14px;z-index:50;
+  position:fixed;bottom:calc(14px + env(safe-area-inset-bottom));right:calc(14px + env(safe-area-inset-right));z-index:50;
   border:3px solid rgba(255,255,255,.7);border-radius:10px;
   overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.35);
   image-rendering:pixelated;
@@ -54,7 +54,7 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 }
 #btn-play:active{transform:translateY(4px);box-shadow:0 2px 0 #9d2700;}
 #mapdisp{
-  position:fixed;top:14px;right:14px;z-index:50;
+  position:fixed;top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right));z-index:50;
   background:rgba(255,250,230,.95);border:3px solid #b8860b;
   border-radius:20px;padding:8px 18px;
   font:700 clamp(14px,3.5vw,22px)/1 Georgia,serif;
@@ -566,13 +566,13 @@ function easeCamera(dt) {
 
 // ── Input ─────────────────────────────────────────────────────
 const keys={};
-window.addEventListener('keydown',e=>{ keys[e.key]=true; if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); });
+window.addEventListener('keydown',e=>{ keys[e.key]=true; unlockAudio(); if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); });
 window.addEventListener('keyup',  e=>{ keys[e.key]=false; });
 const joy={active:false,bx:0,by:0,dx:0,dy:0};
 const joyBase=document.getElementById('joy-base');
 const joyKnob=document.getElementById('joy-knob');
 const JR=50;
-canvas.addEventListener('touchstart',e=>{ e.preventDefault(); const t=e.changedTouches[0]; joy.active=true;joy.bx=t.clientX;joy.by=t.clientY;joy.dx=0;joy.dy=0; joyBase.style.left=t.clientX+'px';joyBase.style.top=t.clientY+'px';joyBase.style.display='block'; },{passive:false});
+canvas.addEventListener('touchstart',e=>{ e.preventDefault(); unlockAudio(); const t=e.changedTouches[0]; joy.active=true;joy.bx=t.clientX;joy.by=t.clientY;joy.dx=0;joy.dy=0; joyBase.style.left=t.clientX+'px';joyBase.style.top=t.clientY+'px';joyBase.style.display='block'; },{passive:false});
 canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.changedTouches[0]; const dx=t.clientX-joy.bx,dy=t.clientY-joy.by; const a=Math.atan2(dy,dx),cl=Math.min(Math.hypot(dx,dy),JR)/JR; joy.dx=Math.cos(a)*cl;joy.dy=Math.sin(a)*cl; joyKnob.style.left=(50+joy.dx*JR)+'px';joyKnob.style.top=(50+joy.dy*JR)+'px'; },{passive:false});
 canvas.addEventListener('touchend', e=>{ e.preventDefault(); joy.active=false;joy.dx=0;joy.dy=0;joyBase.style.display='none'; },{passive:false});
 function inputDir() {
@@ -616,8 +616,14 @@ function blocked(nx,ny) {
 }
 
 // ── Audio ─────────────────────────────────────────────────────
-let aCtx;
+let aCtx, audioUnlocked=false;
 function ac(){if(!aCtx)aCtx=new(window.AudioContext||window.webkitAudioContext)();return aCtx;}
+// iOS/Safari start the AudioContext suspended until a user gesture; resume it
+// on the first touch/key so the first pick-sound isn't swallowed.
+function unlockAudio(){
+  if(audioUnlocked) return;
+  try{ const c=ac(); if(c.state==='suspended') c.resume(); audioUnlocked=true; }catch(e){}
+}
 function beep(freq,dur,vol=.22){
   try{const c=ac(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=freq;o.type='sine';g.gain.setValueAtTime(vol,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+dur);o.start(c.currentTime);o.stop(c.currentTime+dur);}catch(e){}
 }
