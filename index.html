@@ -24,11 +24,12 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 @keyframes hpulse{50%{box-shadow:0 3px 18px rgba(212,58,47,.85);}}
 #mm-wrap{
   position:fixed;bottom:calc(14px + env(safe-area-inset-bottom));right:calc(14px + env(safe-area-inset-right));z-index:50;
-  border:3px solid rgba(255,255,255,.7);border-radius:10px;
-  overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.35);
+  background:rgba(255,250,230,.95);border:3px solid #b8860b;
+  border-radius:12px;padding:4px;
+  overflow:hidden;box-shadow:0 3px 14px rgba(0,0,0,.18);
   image-rendering:pixelated;
 }
-#minimap{display:block;}
+#minimap{display:block;border-radius:6px;}
 #joy-zone{position:fixed;inset:0;z-index:20;pointer-events:none;}
 #joy-base{
   position:absolute;display:none;width:100px;height:100px;border-radius:50%;
@@ -73,7 +74,7 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   <span id="hsep">·</span> <canvas class="hico" id="ico-bil"></canvas> <span id="bcnt">0</span>
   <span id="hsep2">·</span> <canvas class="hico" id="ico-ling"></canvas> <span id="lcnt">0</span>
   <canvas id="hbarcv"></canvas></div>
-<div id="mapdisp">Map <span id="mapnum">1</span></div>
+<div id="mapdisp"><canvas class="hico" id="ico-map"></canvas> Map <span id="mapnum">1</span></div>
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
 <div id="win" role="dialog" aria-modal="true" aria-labelledby="wm-label">
@@ -836,6 +837,12 @@ function initHudIcons(){
     [4,3,4,1,'#e02020'],[3,4,6,1,'#e02020'],[2,5,8,2,'#e02020'],
     [2,7,8,1,'#b01018'],[3,8,6,1,'#b01018'],[4,9,4,1,'#b01018'],
     [4,4,2,2,'#ff7a60'],
+  ]);
+  hudIcon('ico-map',[ // trail signpost with an arrow board
+    [5,1,2,10,'#7a5216'],
+    [1,2,9,4,'#c89238'],[10,3,1,2,'#c89238'],
+    [1,5,9,1,'#8a5a10'],
+    [3,3,3,1,'#7a5216'],[7,4,2,1,'#7a5216'],
   ]);
   const bar=document.getElementById('hbarcv'); bar.width=32; bar.height=10;
 }
