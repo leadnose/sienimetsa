@@ -18,12 +18,8 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   box-shadow:0 3px 14px rgba(0,0,0,.18);
 }
 #hsep,#hsep2{color:#b8860b;}
-#hbar{
-  display:inline-block;width:clamp(46px,10vw,80px);height:.55em;
-  border:2px solid #b8860b;border-radius:8px;overflow:hidden;
-  background:rgba(93,50,0,.15);vertical-align:baseline;
-}
-#hfill{display:block;height:100%;width:100%;background:#6fae3d;transition:width .3s;}
+.hico{width:1.05em;height:1.05em;image-rendering:pixelated;vertical-align:-0.12em;}
+#hbarcv{width:clamp(46px,10vw,80px);height:.6em;image-rendering:pixelated;vertical-align:baseline;}
 #hud.hungry{border-color:#d43a2f;animation:hpulse 1s infinite;}
 @keyframes hpulse{50%{box-shadow:0 3px 18px rgba(212,58,47,.85);}}
 #mm-wrap{
@@ -73,9 +69,10 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 </head>
 <body>
 <canvas id="canvas"></canvas>
-<div id="hud">🧺 <span id="cnt">0</span> / <span id="tot">?</span>
-  <span id="hsep">·</span> 🫐 <span id="bcnt">0</span>
-  <span id="hsep2">·</span> 🍒 <span id="lcnt">0</span> <span id="hbar"><span id="hfill"></span></span></div>
+<div id="hud"><canvas class="hico" id="ico-basket"></canvas> <span id="cnt">0</span> / <span id="tot">?</span>
+  <span id="hsep">·</span> <canvas class="hico" id="ico-bil"></canvas> <span id="bcnt">0</span>
+  <span id="hsep2">·</span> <canvas class="hico" id="ico-ling"></canvas> <span id="lcnt">0</span>
+  <canvas id="hbarcv"></canvas></div>
 <div id="mapdisp">Map <span id="mapnum">1</span></div>
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
@@ -809,6 +806,39 @@ function playPick(){
 function playWin(){[523,659,784,1047,784,1047,1319].forEach((f,i)=>setTimeout(()=>beep(f,.35),i*150));}
 // soft low "nom-nom" — clearly distinct from the bright mushroom arpeggio
 function playEat(){ beep(330,.09,.16); setTimeout(()=>beep(262,.12,.14),70); }
+
+// ── HUD pixel icons ───────────────────────────────────────────
+// Drawn once into tiny canvases (upscaled by CSS with pixelated
+// rendering) so the HUD looks identical on every platform — emoji
+// glyphs vary wildly between OSes. Colours follow the game palette.
+function hudIcon(id,rects){
+  const cv=document.getElementById(id); cv.width=12; cv.height=12;
+  const c=cv.getContext('2d');
+  for(const r of rects){ c.fillStyle=r[4]; c.fillRect(r[0],r[1],r[2],r[3]); }
+}
+function initHudIcons(){
+  hudIcon('ico-basket',[ // woven basket with arched handle
+    [4,0,4,1,'#7a5216'],[3,1,1,1,'#7a5216'],[8,1,1,1,'#7a5216'],
+    [2,2,1,2,'#7a5216'],[9,2,1,2,'#7a5216'],
+    [1,4,10,1,'#c89238'],[1,5,10,1,'#8a5a10'],
+    [1,6,10,1,'#b8860b'],[2,7,8,1,'#a87428'],
+    [2,8,8,1,'#b8860b'],[3,9,6,1,'#a87428'],[4,10,4,1,'#8a6018'],
+    [3,6,1,4,'#7a5216'],[6,6,1,4,'#7a5216'],[9,6,1,2,'#7a5216'],
+  ]);
+  hudIcon('ico-bil',[ // plump bilberry, sheen top-left (sprite colours)
+    [5,0,3,1,'#2a5010'],[6,1,1,2,'#284e12'],
+    [4,3,4,1,'#3054c0'],[3,4,6,1,'#3054c0'],[2,5,8,2,'#3054c0'],
+    [2,7,8,1,'#2242a8'],[3,8,6,1,'#2242a8'],[4,9,4,1,'#2242a8'],
+    [4,4,2,2,'#7a98e8'],
+  ]);
+  hudIcon('ico-ling',[ // lingonberry, same shape in sprite reds
+    [5,0,3,1,'#2a5010'],[6,1,1,2,'#284e12'],
+    [4,3,4,1,'#e02020'],[3,4,6,1,'#e02020'],[2,5,8,2,'#e02020'],
+    [2,7,8,1,'#b01018'],[3,8,6,1,'#b01018'],[4,9,4,1,'#b01018'],
+    [4,4,2,2,'#ff7a60'],
+  ]);
+  const bar=document.getElementById('hbarcv'); bar.width=32; bar.height=10;
+}
 
 // ── DOM effects ───────────────────────────────────────────────
 const CFTCOL=['#ff595e','#ffca3a','#8ac926','#1982c4','#6a4c93','#ff924c','#fff'];
@@ -2314,9 +2344,15 @@ function updateHungerHud(){
   const pct=Math.round(fullness*100);
   if(pct===lastHungerPct) return;
   lastHungerPct=pct;
-  const f=document.getElementById('hfill');
-  f.style.width=pct+'%';
-  f.style.background=fullness<HUNGRY_AT?'#d43a2f':fullness<0.6?'#e8a222':'#6fae3d';
+  // pixel bar: dark frame, cream trough, colour-coded fill in whole px
+  const cv=document.getElementById('hbarcv'), c=cv.getContext('2d');
+  c.fillStyle='#5d3200'; c.fillRect(0,0,cv.width,cv.height);
+  c.fillStyle='#e8dcc0'; c.fillRect(1,1,cv.width-2,cv.height-2);
+  const fw=Math.round((cv.width-2)*fullness);
+  if(fw>0){
+    c.fillStyle=fullness<HUNGRY_AT?'#d43a2f':fullness<0.6?'#e8a222':'#6fae3d';
+    c.fillRect(1,1,fw,cv.height-2);
+  }
   document.getElementById('hud').classList.toggle('hungry',fullness<HUNGRY_AT);
 }
 
@@ -2372,6 +2408,7 @@ document.getElementById('btn-play').addEventListener('click',startGame);
 window.addEventListener('resize',resize);
 document.getElementById('mapnum').textContent=mapNum;
 
+initHudIcons();
 resize();
 startGame();
 let lastT=0;
