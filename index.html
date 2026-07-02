@@ -17,6 +17,15 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   color:#5d3200;display:flex;align-items:center;gap:6px;
   box-shadow:0 3px 14px rgba(0,0,0,.18);
 }
+#hsep,#hsep2{color:#b8860b;}
+#hbar{
+  display:inline-block;width:clamp(46px,10vw,80px);height:.55em;
+  border:2px solid #b8860b;border-radius:8px;overflow:hidden;
+  background:rgba(93,50,0,.15);vertical-align:baseline;
+}
+#hfill{display:block;height:100%;width:100%;background:#6fae3d;transition:width .3s;}
+#hud.hungry{border-color:#d43a2f;animation:hpulse 1s infinite;}
+@keyframes hpulse{50%{box-shadow:0 3px 18px rgba(212,58,47,.85);}}
 #mm-wrap{
   position:fixed;bottom:calc(14px + env(safe-area-inset-bottom));right:calc(14px + env(safe-area-inset-right));z-index:50;
   border:3px solid rgba(255,255,255,.7);border-radius:10px;
@@ -64,7 +73,9 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 </head>
 <body>
 <canvas id="canvas"></canvas>
-<div id="hud">🧺 <span id="cnt">0</span> / <span id="tot">?</span></div>
+<div id="hud">🧺 <span id="cnt">0</span> / <span id="tot">?</span>
+  <span id="hsep">·</span> 🫐 <span id="bcnt">0</span>
+  <span id="hsep2">·</span> 🍒 <span id="lcnt">0</span> <span id="hbar"><span id="hfill"></span></span></div>
 <div id="mapdisp">Map <span id="mapnum">1</span></div>
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
@@ -646,6 +657,14 @@ let collected=0, gameWon=false, gameTime=0;
 let PICK_SPARKS=[];
 const SPARK_PAL=[[200,22,22],[218,170,20],[255,240,170],[255,255,255]];
 const SPEED=260, CHAR_R=14, PICK_R=38, PICK_ANIM_DUR=0.40;
+// Hunger: fullness drains from 1 to 0 over FULL_DRAIN_T seconds of play.
+// Below HUNGRY_AT the gnome is hungry and slows to HUNGRY_SPEED of normal;
+// walking over a berry bush (bilberry/lingonberry) eats it — the berries
+// vanish from the plant and fullness recovers by EAT_RESTORE. He won't
+// graze bushes bare while nearly full (fullness above EAT_BELOW).
+let fullness=1, bilEaten=0, lingEaten=0;
+const FULL_DRAIN_T=60, WALK_DRAIN=3, HUNGRY_AT=0.35, HUNGRY_SPEED=0.55;
+const EAT_RESTORE=0.22, EAT_R=30, REGROW_T=75; // eaten bushes regrow berries after this many s
 // How far into a pond the gnome can wade — 0 = shore, 1 = dead centre.
 // At the cap he's chest-deep; drawGnome() submerges the body to match.
 const WATER_MAX_DEPTH=0.72;
@@ -788,6 +807,8 @@ function playPick(){
   beep(root,.22); setTimeout(()=>beep(root*1.25,.18),60); setTimeout(()=>beep(root*1.50,.15),120);
 }
 function playWin(){[523,659,784,1047,784,1047,1319].forEach((f,i)=>setTimeout(()=>beep(f,.35),i*150));}
+// soft low "nom-nom" — clearly distinct from the bright mushroom arpeggio
+function playEat(){ beep(330,.09,.16); setTimeout(()=>beep(262,.12,.14),70); }
 
 // ── DOM effects ───────────────────────────────────────────────
 const CFTCOL=['#ff595e','#ffca3a','#8ac926','#1982c4','#6a4c93','#ff924c','#fff'];
@@ -2100,19 +2121,27 @@ function drawGnome(wx,wy,t,moving){
 let treeSz=0;
 function setTreeSize(){ treeSz=Math.min(VW,VH)*.065; }
 
-function drawPlant(x,y,t){
+function drawPlant(x,y,t,eaten){
   switch(t){
     case U_BILBERRY:
       pr(x,y,1,2,'#284e12');
       pr(x-2,y-1,2,1,'#2a5010'); pr(x+1,y-1,2,1,'#2a5010');
       pr(x-1,y-2,3,1,'#2a5010');
-      pr(x,y-3,1,1,'#1a3890'); pr(x-1,y-3,1,1,'#3050a0');
+      if(!eaten){ // plump 2x2 berries with a sheen pixel, brighter blues
+        pr(x-2,y-4,2,2,'#3054c0'); pr(x-2,y-4,1,1,'#7a98e8');
+        pr(x+1,y-3,2,2,'#2242a8'); pr(x+1,y-3,1,1,'#5a78d8');
+        pr(x,y-5,1,1,'#4a68c8');
+      }
       break;
     case U_LINGONBERRY:
       pr(x,y,1,2,'#2a4a12');
       pr(x-2,y-1,2,1,'#304e14'); pr(x+1,y-1,2,1,'#304e14');
       pr(x-1,y-2,3,1,'#304e14');
-      pr(x,y-3,1,1,'#b81818'); pr(x-1,y-3,1,1,'#e02828');
+      if(!eaten){ // bright red 2x2 clusters with highlight
+        pr(x-2,y-4,2,2,'#e02020'); pr(x-2,y-4,1,1,'#ff7a60');
+        pr(x+1,y-3,2,2,'#c01418'); pr(x+1,y-3,1,1,'#f04840');
+        pr(x,y-5,1,1,'#f03030');
+      }
       break;
     case U_FERN:
       pr(x,y,1,5,'#1e4010');
@@ -2139,7 +2168,7 @@ function drawVegetation(){
   const items=[];
   UNDERSTORY.forEach(u=>{
     const ux=u.x*WW,uy=u.y*WH;
-    if(ux>x0&&ux<x1&&uy>y0&&uy<y1) items.push({wy:uy,fn:()=>drawPlant(wpx(ux),wpy(uy),u.t)});
+    if(ux>x0&&ux<x1&&uy>y0&&uy<y1) items.push({wy:uy,fn:()=>drawPlant(wpx(ux),wpy(uy),u.t,u.eaten)});
   });
   SHRUBS.forEach(sh=>{
     const sx=sh.x*WW,sy=sh.y*WH;
@@ -2242,7 +2271,10 @@ function update(dt){
   // slopes and pond wading are slow going regardless of trail.
   const pc=pathCodeAt(char.x,char.y);
   const wd=waterDepthAt(char.x,char.y);
-  const spd=SPEED*(wd>0?0.62-0.22*wd:onMountainAt(char.x,char.y)?0.45:pc===3?1.5:pc===2?1.3:pc===1?1.12:1);
+  // walking burns energy WALK_DRAIN× faster than standing still
+  fullness=Math.max(0,fullness-dt/FULL_DRAIN_T*((dx||dy)?WALK_DRAIN:1));
+  const hungryMul=fullness<HUNGRY_AT?HUNGRY_SPEED:1;
+  const spd=SPEED*hungryMul*(wd>0?0.62-0.22*wd:onMountainAt(char.x,char.y)?0.45:pc===3?1.5:pc===2?1.3:pc===1?1.12:1);
   const nx=clamp(char.x+dx*spd*dt,CHAR_R,WW-CHAR_R), ny=clamp(char.y+dy*spd*dt,CHAR_R,WH-CHAR_R);
   if(!blocked(nx,ny)){ char.x=nx; char.y=ny; }
   else { if(!blocked(nx,char.y)) char.x=nx; if(!blocked(char.x,ny)) char.y=ny; }
@@ -2259,6 +2291,33 @@ function update(dt){
       if(collected>=MUSHROOMS.length) setTimeout(showWin,400);
     }
   });
+  // Graze berry bushes in reach (cheap axis rejects before the distance
+  // check — UNDERSTORY can hold hundreds of plants)
+  if(fullness<1){
+    for(const u of UNDERSTORY){
+      if(u.eaten||(u.t!==U_BILBERRY&&u.t!==U_LINGONBERRY)) continue;
+      const ex=u.x*WW-char.x; if(ex>EAT_R||ex<-EAT_R) continue;
+      const ey=u.y*WH-char.y; if(ey>EAT_R||ey<-EAT_R) continue;
+      if(ex*ex+ey*ey>EAT_R*EAT_R) continue;
+      u.eaten=true; u.eatT=gameTime; fullness=Math.min(1,fullness+EAT_RESTORE);
+      if(u.t===U_BILBERRY){ bilEaten++; document.getElementById('bcnt').textContent=bilEaten; }
+      else { lingEaten++; document.getElementById('lcnt').textContent=lingEaten; }
+      playEat(); spawnCanvasSparks(u.x*WW,u.y*WH);
+      if(fullness>=1) break;
+    }
+  }
+  for(const u of UNDERSTORY) if(u.eaten&&gameTime-u.eatT>REGROW_T) u.eaten=false;
+  updateHungerHud();
+}
+let lastHungerPct=-1;
+function updateHungerHud(){
+  const pct=Math.round(fullness*100);
+  if(pct===lastHungerPct) return;
+  lastHungerPct=pct;
+  const f=document.getElementById('hfill');
+  f.style.width=pct+'%';
+  f.style.background=fullness<HUNGRY_AT?'#d43a2f':fullness<0.6?'#e8a222':'#6fae3d';
+  document.getElementById('hud').classList.toggle('hungry',fullness<HUNGRY_AT);
 }
 
 // ── Win ───────────────────────────────────────────────────────
@@ -2298,6 +2357,10 @@ function resize(){
 function startGame(){
   document.getElementById('btn-play').blur();
   collected=0; gameWon=false; gameTime=0; PICK_SPARKS=[];
+  fullness=1; lastHungerPct=-1; UNDERSTORY.forEach(u=>u.eaten=false);
+  bilEaten=0; lingEaten=0;
+  document.getElementById('bcnt').textContent='0';
+  document.getElementById('lcnt').textContent='0';
   MUSHROOMS.forEach(m=>{m.collected=false;m.pickT=0;});
   document.getElementById('cnt').textContent='0';
   document.getElementById('win').classList.remove('show');
