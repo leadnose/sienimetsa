@@ -142,6 +142,98 @@ let PATHS=[], PATH_MASK=null;    // trail polylines + rasterised influence grid
 const PM_N=200;                  // path-influence grid resolution
 const PATH_CAP=190, PATH_MAXDEPTH=5; // fractal-branch budget / recursion depth
 
+// Ponds are wobbly ellipses, not perfect ovals: each carries 2-3 sine
+// harmonics (freq k, amplitude a, phase p) so the shoreline has natural
+// bumps and inlets. Given the angle from a pond's centre (in normalized
+// ellipse space, where the base rx/ry circle is angle-independent), this
+// returns the radius multiplier at that angle — rendering, wading depth
+// and collision all call it so the three never disagree with each other.
+function waterEdgeMul(wob, ang){
+  let m=1;
+  for(const h of wob) m+=h.a*Math.sin(h.k*ang+h.p);
+  return m;
+}
+// d(waterEdgeMul)/d(ang) — needed to convert the shoreline's normalized
+// radius into an actual screen-pixel distance (see drawWater's pxScaleLUT):
+// wherever the wobble radius changes quickly with angle, the shore's true
+// outward normal tilts away from purely radial, so the radial gradient
+// alone understates how fast you cross the shore and shore bands would
+// otherwise compress to nothing at those angles.
+function waterEdgeSlope(wob, ang){
+  let s=0;
+  for(const h of wob) s+=h.a*h.k*Math.cos(h.k*ang+h.p);
+  return s;
+}
+
+// Turn a river's control points into a dense centreline: Catmull-Rom
+// through the points (so bends are smooth curves, not jointed straights),
+// one sample every ~6 low-res pixels, each carrying a width multiplier.
+// Width = two sine harmonics along the run (slow swells + quicker
+// narrows) on an envelope that starts as a narrow spring and, if the
+// river never reaches a lake, dwindles to a trickle instead of stopping
+// dead at full width.
+function buildRiverSamples(rv, r){
+  const P=rv.pts, n=P.length, smp=[];
+  const segLens=[]; let total=0;
+  for(let s=0;s<n-1;s++){
+    const L=Math.hypot((P[s+1].x-P[s].x)*WW,(P[s+1].y-P[s].y)*WH);
+    segLens.push(L); total+=L;
+  }
+  const wob=[{k:4+r()*3, a:.40+r()*.18, p:r()*Math.PI*2},
+             {k:10+r()*5, a:.18+r()*.10, p:r()*Math.PI*2}];
+  const widthAt=(t)=>{
+    let m=1;
+    for(const h of wob) m+=h.a*Math.sin(h.k*Math.PI*2*t+h.p);
+    m*=0.55+0.45*Math.min(1,t/0.15);
+    // floor before the trickle fade so mid-course narrows never pinch
+    // below ~half width, while dead ends still dwindle away
+    m=Math.max(0.55,Math.min(2.2,m));
+    if(!rv.toLake&&t>0.72) m*=Math.max(0.3,1-((t-0.72)/0.28)*0.75);
+    return m;
+  };
+  // Estuary flare: widen toward the lake based on each sample's distance
+  // to the lake's wobbly shoreline (not river-t, which ends at the lake's
+  // centre), fanning out to ~2.3× as the mouth meets the shore.
+  const mulAt=(x,y,t)=>{
+    let m=widthAt(t);
+    if(rv.lake){
+      const w=rv.lake;
+      const ux=(x-w.x)/w.rx, uy=(y-w.y)/w.ry;
+      const lr=Math.hypot(ux,uy)/waterEdgeMul(w.wob,Math.atan2(uy,ux));
+      const f=Math.max(0,Math.min(1,(2.2-lr)/1.2));
+      m=Math.min(3.2,m*(1+1.3*f*f));
+    }
+    return m;
+  };
+  let acc=0;
+  for(let s=0;s<n-1;s++){
+    const p0=P[s>0?s-1:0], p1=P[s], p2=P[s+1], p3=P[s<n-2?s+2:n-1];
+    const steps=Math.max(1,Math.round(segLens[s]/(6*PS)));
+    for(let j=0;j<steps;j++){
+      const u=j/steps, u2=u*u, u3=u2*u;
+      const x=.5*(2*p1.x+(-p0.x+p2.x)*u+(2*p0.x-5*p1.x+4*p2.x-p3.x)*u2+(-p0.x+3*p1.x-3*p2.x+p3.x)*u3);
+      const y=.5*(2*p1.y+(-p0.y+p2.y)*u+(2*p0.y-5*p1.y+4*p2.y-p3.y)*u2+(-p0.y+3*p1.y-3*p2.y+p3.y)*u3);
+      smp.push({x,y,m:mulAt(x,y,(acc+u*segLens[s])/total)});
+    }
+    acc+=segLens[s];
+  }
+  smp.push({x:P[n-1].x, y:P[n-1].y, m:mulAt(P[n-1].x,P[n-1].y,1)});
+  rv.smp=smp;
+  // Record where the centreline crosses the lake's shoreline: drawWater
+  // brightens its water in a wide fan around each mouth so the inflow
+  // current visibly spreads into the lake.
+  if(rv.lake){
+    const w=rv.lake;
+    for(const s of smp){
+      const ux=(s.x-w.x)/w.rx, uy=(s.y-w.y)/w.ry;
+      if(Math.hypot(ux,uy)/waterEdgeMul(w.wob,Math.atan2(uy,ux))<1){
+        (w.mouths=w.mouths||[]).push({x:s.x,y:s.y,m:s.m});
+        break;
+      }
+    }
+  }
+}
+
 function terrainAt(x,y){
   let bestInf=0, best=T_GRASS;
   for(const z of TERRAIN_ZONES){
@@ -176,7 +268,12 @@ function generateWorld(seed){
     const clearW = WATER_DEF.every(w=>Math.hypot(wx-w.x,wy-w.y)>0.14);
     if(clearM&&clearW){
       const rx=0.025+r()*.068, ry=rx*(0.48+r()*.64);
-      WATER_DEF.push({x:wx,y:wy,rx,ry});
+      // 2 low-frequency harmonics, decreasing amplitude — keeps the shore
+      // a gentle, non-self-intersecting blob (radius swings roughly
+      // ±18%, slope stays shallow) rather than a jagged star that pinches
+      // down to a sliver at its narrow points.
+      const wob=[2,3].map((k,i)=>({k, a:(0.09/(i+1))*(0.7+r()*0.6), p:r()*Math.PI*2}));
+      WATER_DEF.push({x:wx,y:wy,rx,ry,wob});
     }
   }
   RIVERS = [];
@@ -184,16 +281,30 @@ function generateWorld(seed){
   for(let i=0;i<Math.min(nR,3);i++){
     const m = MOUNT_DEF[Math.floor(r()*MOUNT_DEF.length)];
     const sx=clamp(m.x+(r()-.5)*.12,0,1), sy=clamp(m.y+m.s*.09+r()*.06,0,1);
-    let ex,ey;
-    if(WATER_DEF.length&&r()>.3){ const w=WATER_DEF[Math.floor(r()*WATER_DEF.length)]; ex=w.x;ey=w.y; }
+    let ex,ey,lake=null;
+    if(WATER_DEF.length&&r()>.3){ lake=WATER_DEF[Math.floor(r()*WATER_DEF.length)]; ex=lake.x;ey=lake.y; }
     else { ex=0.1+r()*.8; ey=0.55+r()*.4; }
-    const nP=4+Math.floor(r()*4), pts=[];
-    for(let p=0;p<=nP;p++){
-      const t=p/nP, wiggle=Math.sin(t*Math.PI)*.06;
-      pts.push({x:clamp(sx+(ex-sx)*t+(r()-.5)*wiggle,0,1),
-                y:clamp(sy+(ey-sy)*t+(r()-.5)*wiggle*.7,0,1)});
+    // Midpoint displacement: repeatedly split each span, pushing the new
+    // midpoint sideways (perpendicular) by a random fraction of the span
+    // length that shrinks per level — big sweeping meanders with smaller
+    // bends layered on top, instead of a near-straight jointed polyline.
+    let pts=[{x:sx,y:sy},{x:ex,y:ey}];
+    const amps=[.42,.30,.20,.12];
+    for(const amp of amps){
+      const next=[pts[0]];
+      for(let s=0;s<pts.length-1;s++){
+        const a=pts[s], b=pts[s+1];
+        const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1e-6;
+        const off=(r()-.5)*2*amp*len;
+        next.push({x:clamp((a.x+b.x)/2-dy/len*off,0.02,0.98),
+                   y:clamp((a.y+b.y)/2+dx/len*off,0.02,0.98)});
+        next.push(b);
+      }
+      pts=next;
     }
-    RIVERS.push(pts);
+    const rv={pts,toLake:Boolean(lake),lake};
+    buildRiverSamples(rv,r);
+    RIVERS.push(rv);
   }
   // Terrain zones: 1=sand 2=marsh 3=rock 4=gravel
   TERRAIN_ZONES = [];
@@ -522,7 +633,7 @@ function buildWorld() {
   // stopped — so the collider is a *shrunken* ellipse around the deep
   // centre, not the pond's full shore-to-shore extent.
   COLLIDERS = [
-    ...WATER_DEF.map(w => ({fx:w.x, fy:w.y, frx:w.rx*(1-WATER_MAX_DEPTH), fry:w.ry*(1-WATER_MAX_DEPTH)})),
+    ...WATER_DEF.map(w => ({fx:w.x, fy:w.y, frx:w.rx*(1-WATER_MAX_DEPTH), fry:w.ry*(1-WATER_MAX_DEPTH), wob:w.wob})),
   ];
   buildTreeGrid();
   document.getElementById('tot').textContent = MUSHROOMS.length;
@@ -607,12 +718,16 @@ function buildTreeGrid(){
   }
 }
 function blocked(nx,ny) {
-  // Ponds are ellipses (rx,ry independently scaled by WW,WH — see drawWater),
-  // often quite elongated. A circular collider sized off the larger radius
-  // used to block a stretch of clear ground alongside the narrow axis; check
-  // the actual ellipse (per-axis, CHAR_R-padded) instead.
+  // Ponds are wobbly ellipses (rx,ry independently scaled by WW,WH, plus
+  // angle-dependent wobble — see drawWater/waterEdgeMul), often quite
+  // elongated. A circular collider sized off the larger radius used to
+  // block a stretch of clear ground alongside the narrow axis; check the
+  // actual wobbly ellipse (per-axis, CHAR_R-padded) instead.
   for(const c of COLLIDERS){
-    const ex=(nx-c.fx*WW)/(c.frx*WW+CHAR_R), ey=(ny-c.fy*WH)/(c.fry*WH+CHAR_R);
+    const cx=c.fx*WW, cy=c.fy*WH, crx=c.frx*WW, cry=c.fry*WH;
+    const ux=(nx-cx)/crx, uy=(ny-cy)/cry;
+    const m=waterEdgeMul(c.wob, Math.atan2(uy,ux));
+    const ex=(nx-cx)/(crx*m+CHAR_R), ey=(ny-cy)/(cry*m+CHAR_R);
     if(ex*ex+ey*ey<1) return true;
   }
   if(TREE_GRID){
@@ -646,8 +761,9 @@ function onMountainAt(x,y){
 function waterDepthAt(x,y){
   let best=0;
   for(const w of WATER_DEF){
-    const dx=(x-w.x*WW)/(w.rx*WW), dy=(y-w.y*WH)/(w.ry*WH);
-    const d=1-Math.hypot(dx,dy);
+    const ux=(x-w.x*WW)/(w.rx*WW), uy=(y-w.y*WH)/(w.ry*WH);
+    const m=waterEdgeMul(w.wob, Math.atan2(uy,ux));
+    const d=1-Math.hypot(ux,uy)/m;
     if(d>best) best=d;
   }
   return best;
@@ -1290,30 +1406,115 @@ function stampPath(buf,cpx,cpy,x0,y0,x1,y1,cfg,fade){
 }
 
 // ── Rivers ────────────────────────────────────────────────────
-// Banks: 3-ring earth transition. Water body with animated flow dots.
+// Per-pixel pass over the dense centreline (same idiom as stampPath /
+// drawWater): each pixel near the river takes its colour from how far
+// past the local waterline it sits — water depth-shaded with Bayer
+// dithering toward a bright midstream, then a short earth bank band.
+// The old renderer stamped bank+water rings per straight segment, so
+// every joint had the next segment's bank painted across the previous
+// segment's water; here overlapping stretches min-combine their offsets
+// in RIV_OFF, so joints and hairpin bends stay seamless.
+let RIV_OFF=null;
 function drawRivers(){
-  const tick=Math.floor(gameTime*5);
-  RIVERS.forEach(pts=>{
-    const pxPts=pts.map(p=>({x:wpx(p.x*WW),y:wpy(p.y*WH)}));
-    for(let i=0;i<pxPts.length-1;i++){
-      const {x:x0,y:y0}=pxPts[i], {x:x1,y:y1}=pxPts[i+1];
-      if(x0<-14&&x1<-14||x0>pixW+14&&x1>pixW+14) continue;
-      // Earth banks
-      pixLine(x0,y0,x1,y1,14,'#7a6018');
-      pixLine(x0,y0,x1,y1,12,'#8a7020');
-      pixLine(x0,y0,x1,y1,10,'#6a5010');
-      // Water body (dark → mid → highlight)
-      pixLine(x0,y0,x1,y1,7,'#0c2e50');
-      pixLine(x0,y0,x1,y1,5,'#185880');
-      pixLine(x0,y0,x1,y1,3,'#2878b0');
-      pixLine(x0,y0,x1,y1,1,'#40a0d8');
-      // Flow dots — two animated dots per segment
-      for(let d=0;d<2;d++){
-        const f=((i*7+d*5+tick)%12)/12;
-        const dx=(x0+(x1-x0)*f)|0, dy=(y0+(y1-y0)*f)|0;
-        pr(dx,dy,2,1,'#80c8f0');
-        pr(dx-1,dy+1,1,1,'#50a0d0');
+  if(!RIVERS.length) return;
+  const npx=pixW*pixH;
+  if(!RIV_OFF||RIV_OFF.length<npx) RIV_OFF=new Float32Array(npx);
+  RIV_OFF.fill(1e9);
+  const id=pixCtx.getImageData(0,0,pixW,pixH), buf=id.data;
+  const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
+  const HW=5.5, BANK=5; // base water halfwidth / bank band width, px
+  const wtick=Math.floor(gameTime*2); // matches drawWater's wave-stripe tick
+  // Same ramps as the lakes (drawWater's wPal/shoreCols) minus the deepest
+  // water step — rivers are shallow — so a river reads as the same water
+  // where it meets a lake, not a differently-tinted stream. The bank band
+  // is the lake shore ramp verbatim (same 5 colours, same 1px-per-step
+  // width) so at a confluence the two shorelines can merge into one
+  // continuous band (drawWater min-combines against RIV_OFF).
+  const wPal=[[14,52,88],[22,78,128],[34,104,160],[52,132,190]];
+  const bankCols=[[92,64,16],[122,92,24],[160,120,40],[184,144,48],[204,168,64]];
+  for(const rv of RIVERS){
+    const smp=rv.smp, nSeg=smp.length-1;
+    for(let i=0;i<nSeg;i++){
+      const x0=wpx(smp[i].x*WW), y0=wpy(smp[i].y*WH);
+      const x1=wpx(smp[i+1].x*WW), y1=wpy(smp[i+1].y*WH);
+      const hw0=HW*smp[i].m, hw1=HW*smp[i+1].m;
+      // Inside the lake the current fans out into a plume, so segments
+      // near/inside the lake need extra lateral reach recorded in RIV_OFF
+      // (drawWater dithers the plume against lake water out to this cone).
+      let extra=0;
+      if(rv.lake){
+        const w=rv.lake;
+        const ux=(smp[i].x-w.x)/w.rx, uy=(smp[i].y-w.y)/w.ry;
+        if(Math.hypot(ux,uy)/waterEdgeMul(w.wob,Math.atan2(uy,ux))<1.2) extra=32;
       }
+      const reach=Math.max(hw0,hw1)+BANK+extra;
+      const minx=Math.max(0,(Math.min(x0,x1)-reach)|0), maxx=Math.min(pixW-1,Math.ceil(Math.max(x0,x1)+reach));
+      const miny=Math.max(0,(Math.min(y0,y1)-reach)|0), maxy=Math.min(pixH-1,Math.ceil(Math.max(y0,y1)+reach));
+      if(minx>maxx||miny>maxy) continue;
+      const dx=x1-x0, dy=y1-y0, ll=dx*dx+dy*dy||1;
+      for(let py=miny;py<=maxy;py++){
+        for(let px=minx;px<=maxx;px++){
+          let t=((px-x0)*dx+(py-y0)*dy)/ll; t=t<0?0:t>1?1:t;
+          const ex=px-(x0+dx*t), ey=py-(y0+dy*t), d=Math.sqrt(ex*ex+ey*ey);
+          const hw=hw0+(hw1-hw0)*t, off=d-hw;
+          if(off>BANK+extra) continue;
+          const bi=py*pixW+px;
+          if(off>=RIV_OFF[bi]) continue; // a nearer stretch already painted this pixel
+          // Lake-normalized radius of this pixel (<1 = inside the lake) —
+          // drives both the mouth colour blend and the plume fan-out.
+          let lr=1e9;
+          if(rv.lake){
+            const w=rv.lake;
+            const ux=((px+cpx)*PS/WW-w.x)/w.rx, uy=((py+cpy)*PS/WH-w.y)/w.ry;
+            lr=Math.hypot(ux,uy)/waterEdgeMul(w.wob,Math.atan2(uy,ux));
+          }
+          const inLake=lr<1;
+          if(off>BANK&&!inLake) continue; // plume margin exists only inside the lake
+          RIV_OFF[bi]=off;
+          let c;
+          if(off<=0||inLake){
+            // Inside the lake there are no banks — everything out to the
+            // plume cone is water (negative shade just clamps to the
+            // darkest step). The mouth blend: approaching the shore, damp
+            // the river's brightness toward the lake's near-zero edge
+            // shade and mix in the lake's diagonal wave stripes so colour
+            // and texture flow across the junction. Keyed to the pixel's
+            // distance to the wobbly shoreline, NOT river-t (the
+            // centreline ends at the lake's centre, so a t-based fade
+            // finishes deep inside the pond where it's never seen).
+            // Capped below 1 so the stretch dithered into the lake still
+            // reads as a slightly brighter current.
+            let shade=(1-d/hw)*3.2;
+            const f=Math.max(0,Math.min(0.7,(1.55-lr)/0.55));
+            if(f>0) shade=shade*(1-0.88*f)+(((px-py+wtick)&7)<2?0.8*f:0);
+            shade=Math.min(wPal.length-1-1e-4,shade);
+            const i0=Math.max(0,shade|0);
+            c=wPal[(shade-i0)*16>b4(px+cpx,py+cpy)?i0+1:i0];
+          } else {
+            c=bankCols[Math.min(4,off|0)]; // same pick as the lake shore
+          }
+          const p=4*bi;
+          buf[p]=c[0];buf[p+1]=c[1];buf[p+2]=c[2];buf[p+3]=255;
+        }
+      }
+    }
+  }
+  pixCtx.putImageData(id,0,0);
+  // Flow dots drifting downstream along the centreline
+  const tick=Math.floor(gameTime*5);
+  RIVERS.forEach(rv=>{
+    const smp=rv.smp, n=smp.length;
+    for(let d=0;d<Math.max(2,n>>4);d++){
+      // JS % keeps the dividend's sign and tick can be briefly negative
+      // (first-frame dt can be negative under timestamp quantization), so
+      // force the index into [0,n) or smp[-1] crashes the render loop.
+      const si=(((d*16+tick)%n)+n)%n, s=smp[si];
+      if(s.m<0.45) continue; // no sparkle on a dwindling trickle
+      if(rv.toLake&&si/n>0.82) continue; // nor on the darkened mouth stretch
+      const fx=wpx(s.x*WW), fy=wpy(s.y*WH);
+      if(fx<0||fx>pixW||fy<0||fy>pixH) continue;
+      pr(fx,fy,2,1,'#70c8f0');
+      pr(fx-1,fy+1,1,1,'#a8e0ff');
     }
   });
 }
@@ -1325,47 +1526,139 @@ function drawRivers(){
 function drawWater(w,wi){
   const cx=wpx(w.x*WW), cy=wpy(w.y*WH);
   const rx=Math.max(3,(w.rx*WW/PS)|0), ry=Math.max(3,(w.ry*WH/PS)|0);
-  if(cx+rx<0||cx-rx>pixW||cy+ry<0||cy-ry>pixH) return;
+  const SHORE=5; // widest shore band, in px, beyond the wobbly shoreline
+  // Wobble can push the true shore out past the base rx/ry by its combined
+  // amplitude (e.g. ~18% of the radius) — for a large pond that's far more
+  // than a few pixels, so the render/cull bounds must grow with rx/ry, not
+  // just by a flat SHORE margin, or the far side of a bulge gets clipped
+  // to a hard rectangular edge.
+  const wobMax=1+w.wob.reduce((s,h)=>s+h.a,0);
+  // Must be integers: bx0/by0/bw/bh below derive from these, and the
+  // per-pixel fill loop indexes the ImageData buffer using bw as an
+  // integer row stride. A fractional mrx/mry made bx0 fractional, which
+  // getImageData silently truncates to integer pixels while the fill loop
+  // kept using the fractional bw as its stride — every row past the first
+  // computed a non-integer typed-array index, which silently no-ops on
+  // write, so only a 1px sliver at the top of the pond ever got painted.
+  const mrx=Math.ceil(rx*wobMax), mry=Math.ceil(ry*wobMax);
+  if(cx+mrx+SHORE<0||cx-mrx-SHORE>pixW||cy+mry+SHORE<0||cy-mry-SHORE>pixH) return;
 
-  // Shore rings: bright sand → dark mud, largest first
-  const shoreRings=[
-    {off:5, col:'#cca840'},  // dry sand
-    {off:4, col:'#b89030'},  // sand
-    {off:3, col:'#a07828'},  // wet sand
-    {off:2, col:'#7a5c18'},  // wet mud
-    {off:1, col:'#5c4010'},  // dark silt
-  ];
-  shoreRings.forEach(({off,col})=>{
-    pixCtx.fillStyle=col;
-    for(let dy=-(ry+off);dy<=ry+off;dy++){
-      const rw=Math.round((rx+off)*Math.sqrt(Math.max(0,1-(dy/(ry+off))**2)));
-      if(rw>0) pixCtx.fillRect(cx-rw,cy+dy,rw*2,1);
-    }
-  });
+  // Shore bands (dark silt → dry sand) and the water body are rendered
+  // together in one per-pixel pass into a local ImageData region: each
+  // pixel's offset from the pond centre is checked against the wobbly
+  // shoreline radius at that angle (waterEdgeMul), so the bands and the
+  // water's own depth shading both follow the pond's irregular outline
+  // instead of a plain ellipse. The angle→radius curve is precomputed into
+  // a small lookup table once per call so the hot per-pixel loop only pays
+  // for one atan2 + array read, not three sines per pixel.
+  //
+  // Converting "normalized radius past the shore" into an actual pixel
+  // band width needs a direction-dependent scale, not one constant: at an
+  // elongated pond's pointed ends a unit of normalized radius covers far
+  // more screen pixels than at its waist, and wherever the wobble radius
+  // changes quickly with angle the shoreline's outward normal tilts away
+  // from radial too. Ignoring either made bands compress to sub-pixel
+  // width and vanish along parts of the shore, so pxScaleLUT is the true
+  // local scale (1/|∇f|, f = normalized radius minus wobbly edge radius)
+  // for each angle bucket, keeping the band ~SHORE px wide all the way
+  // around however the shoreline bends.
+  const LUT_N=48, edgeLUT=new Float32Array(LUT_N), pxScaleLUT=new Float32Array(LUT_N);
+  for(let i=0;i<LUT_N;i++){
+    const ang=-Math.PI+(i+0.5)*(2*Math.PI/LUT_N);
+    const m=waterEdgeMul(w.wob,ang), mp=waterEdgeSlope(w.wob,ang), k=mp/m;
+    edgeLUT[i]=m;
+    const ct=Math.cos(ang), st=Math.sin(ang);
+    const gx=(ct+k*st)/rx, gy=(st-k*ct)/ry;
+    pxScaleLUT[i]=1/Math.sqrt(gx*gx+gy*gy);
+  }
+  // Bucket i stores the value at its center angle, so sampling at a bucket's
+  // own center should return that bucket's value exactly (f=0) — hence the
+  // -0.5 below. Without interpolation, medge/pxScale jump abruptly at each
+  // bucket boundary, which reads as small stair-step notches around the
+  // shoreline instead of a smooth curve.
+  const lutSample=(arr,ang)=>{
+    const t=(ang+Math.PI)*(LUT_N/(2*Math.PI))-0.5;
+    let i0=Math.floor(t);
+    const f=t-i0;
+    i0=((i0%LUT_N)+LUT_N)%LUT_N;
+    const i1=(i0+1)%LUT_N;
+    return arr[i0]+(arr[i1]-arr[i0])*f;
+  };
+  const edgeAt=(ang)=>lutSample(edgeLUT,ang);
 
-  // Water body rendered into a local ImageData region (avoids per-pixel fillStyle)
+  // Shore band colours, closest to farthest from the true shoreline
+  const shoreCols=[[92,64,16],[122,92,24],[160,120,40],[184,144,48],[204,168,64]];
   const tick=Math.floor(gameTime*2);
   const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
-  const bx0=Math.max(0,cx-rx-1), bx1=Math.min(pixW,cx+rx+2);
-  const by0=Math.max(0,cy-ry-1), by1=Math.min(pixH,cy+ry+2);
+  const bx0=Math.max(0,cx-mrx-SHORE), bx1=Math.min(pixW,cx+mrx+SHORE+1);
+  const by0=Math.max(0,cy-mry-SHORE), by1=Math.min(pixH,cy+mry+SHORE+1);
   const bw=bx1-bx0, bh=by1-by0;
   if(bw>0&&bh>0){
     const wid=pixCtx.getImageData(bx0,by0,bw,bh);
     const wb=wid.data;
     // Depth palette: very deep → bright surface (precomputed RGB)
     const wPal=[[10,32,60],[14,52,88],[22,78,128],[34,104,160],[52,132,190]];
+    // River inflow plumes: a wide fan of brightened water around each
+    // recorded river mouth, fading out radially (dm/R past 1 → no boost)
+    const mouths=(w.mouths||[]).map(mo=>({mx:wpx(mo.x*WW),my:wpy(mo.y*WH),R:mo.m*26}));
     for(let row=0;row<bh;row++){
-      const py=by0+row, dy=py-cy;
+      const py=by0+row, dy=py-cy, v=dy/ry;
       for(let col=0;col<bw;col++){
-        const px=bx0+col, dx=px-cx;
-        if(dx*dx/(rx*rx)+dy*dy/(ry*ry)>1.01) continue;
-        const depth=1-Math.sqrt((dx/rx)**2+(dy/ry)**2);
-        const wave=(px-py+tick)&7;
-        let shade=depth*3.5+((wave<2)?0.8:0);
-        shade=Math.max(0,Math.min(wPal.length-1-1e-4,shade));
-        const i0=shade|0;
-        const pick=(shade-i0)*16>b4(px+cpx,py+cpy)?i0+1:i0;
-        const c=wPal[pick], bp=4*(row*bw+col);
+        const px=bx0+col, dx=px-cx, u=dx/rx;
+        const r0=Math.hypot(u,v);
+        const ang=Math.atan2(v,u);
+        const medge=lutSample(edgeLUT,ang);
+        const offPx=(r0-medge)*lutSample(pxScaleLUT,ang);
+        // Confluence: RIV_OFF holds this pixel's offset past the river's
+        // waterline (drawRivers runs first; <=0 is open water — keep the
+        // channel clear). Instead of a hard min of the two shore-distance
+        // fields (which leaves an angular notch where the channel's edge
+        // crosses the shoreline), blend them with a smooth-min: near the
+        // junction the combined waterline bows outward, rounding the
+        // corners, and the shared 5-colour band follows the rounded curve.
+        const roff=RIV_OFF?RIV_OFF[py*pixW+px]:1e9;
+        // Open river channel beyond the shoreline: the river's ramp lacks
+        // the lake's darkest edge colour, so a hard handoff reads as a
+        // line across the water. Instead, over the channel's last ~6px,
+        // dither pond edge-water pixels into the river (Bayer-ordered,
+        // like every other transition in the art) so the palettes
+        // cross-fade pixel by pixel.
+        let mouthDither=false;
+        // The current's footprint: the channel itself (roff<=0), plus —
+        // inside the lake — a plume cone whose lateral extent grows with
+        // depth past the shoreline (like a real inflow fanning out).
+        const plumeLat=offPx<0?-offPx*1.6:0;
+        if(roff<=0||(roff<1e8&&roff<=plumeLat)){
+          // One dithered cross-fade spanning the shoreline: pure river
+          // ~6px outside, half-and-half at the shore, fully lake ~20px
+          // inside; plume flanks also fade toward the cone's edge.
+          let q=offPx>0?(6-offPx)/12:0.5-offPx/40;   // "pondness" of this pixel
+          if(roff>0) q=Math.max(q,roff/plumeLat);
+          if(q*16<=b4(px+cpx+2,py+cpy+1)) continue;  // river pixel survives
+          if(offPx>0) mouthDither=true;              // else paint pond water here
+        }
+        let co=offPx;
+        if(roff>0&&roff<1e8){
+          const k=6, h=Math.max(0,Math.min(1,.5+.5*(roff-offPx)/k));
+          co=roff*(1-h)+offPx*h-k*h*(1-h);
+        }
+        let c;
+        if(offPx<=0||co<=0||mouthDither){
+          const depth=1-r0/medge; // negative in the rounded notch → clamps to edge shade
+          const wave=(px-py+tick)&7;
+          let shade=depth*3.5+((wave<2)?0.8:0);
+          for(const mo of mouths){
+            const boost=2.6*(1-Math.hypot(px-mo.mx,py-mo.my)/mo.R);
+            if(boost>shade) shade=boost;
+          }
+          shade=Math.max(0,Math.min(wPal.length-1-1e-4,shade));
+          const i0=shade|0;
+          const pick=(shade-i0)*16>b4(px+cpx,py+cpy)?i0+1:i0;
+          c=wPal[pick];
+        } else if(co<=5){
+          c=shoreCols[Math.min(4,co|0)];
+        } else continue;
+        const bp=4*(row*bw+col);
         wb[bp]=c[0];wb[bp+1]=c[1];wb[bp+2]=c[2];wb[bp+3]=255;
       }
     }
@@ -1376,9 +1669,11 @@ function drawWater(w,wi){
   const htick=Math.floor(gameTime*3);
   const wRng=mkRng(wi*137+htick*41);
   for(let i=0;i<Math.max(3,rx>>2);i++){
-    const ha=wRng()*Math.PI*1.2-Math.PI*.9;  // upper-left arc
-    const hd=rx*(0.20+wRng()*.65);
-    const hx=(cx+Math.cos(ha)*hd)|0, hy=(cy+Math.sin(ha)*hd*.75)|0;
+    const ha=wRng()*Math.PI*2-Math.PI;  // full circle
+    // Scale by the true wobbly edge distance at this angle (not just rx),
+    // or a dash can land past the shore wherever the wobble pinches inward.
+    const hr=edgeAt(ha)*(0.20+wRng()*.65);
+    const hx=(cx+Math.cos(ha)*hr*rx)|0, hy=(cy+Math.sin(ha)*hr*ry)|0;
     const hw=Math.max(2,2+(wRng()*4)|0);
     pr(hx,hy,hw,1,'#70c8f0');
     pr(hx+1,hy-1,hw-1,1,'#a8e0ff');
@@ -1403,7 +1698,7 @@ function drawWater(w,wi){
     // Reeds
     const nr=mkRng(wi*53+7);
     for(let i=0;i<4;i++){
-      const ra=nr()*Math.PI*2, rd=rx*(0.82+nr()*.16);
+      const ra=nr()*Math.PI*2, rd=rx*edgeAt(ra)*(0.82+nr()*.16);
       const bx=(cx+Math.cos(ra)*rd)|0, bby=(cy+Math.sin(ra)*rd*.7)|0;
       const rh=Math.max(3,(rx*.65+nr()*rx*.45)|0);
       pixLine(bx,bby,bx+(nr()-.5)*2|0,bby-rh,1,'#8a6820');
@@ -1875,9 +2170,15 @@ function renderMinimap(){
     mmCtx.fillStyle=tzCol[z.t];
     mmCtx.beginPath();mmCtx.ellipse(z.x*mw,z.y*mh,z.rx*mw,z.ry*mh,0,0,Math.PI*2);mmCtx.fill();
   });
-  RIVERS.forEach(pts=>{
+  RIVERS.forEach(rv=>{
     mmCtx.strokeStyle=P.mm_w;mmCtx.lineWidth=2;
-    mmCtx.beginPath();pts.forEach((p,i)=>i===0?mmCtx.moveTo(p.x*mw,p.y*mh):mmCtx.lineTo(p.x*mw,p.y*mh));mmCtx.stroke();
+    mmCtx.beginPath();
+    // every 4th centreline sample — follows the meanders, cheap to stroke
+    rv.smp.forEach((p,i)=>{
+      if(i%4&&i!==rv.smp.length-1) return;
+      i===0?mmCtx.moveTo(p.x*mw,p.y*mh):mmCtx.lineTo(p.x*mw,p.y*mh);
+    });
+    mmCtx.stroke();
   });
   WATER_DEF.forEach(w=>{
     mmCtx.fillStyle=P.mm_w;
