@@ -677,12 +677,12 @@ function findStart() {
   for(let i=0; i<300 && trails.length; i++){
     const p=trails[(r()*trails.length)|0], pt=p.pts[(r()*p.pts.length)|0];
     const x=pt.x*WW, y=pt.y*WH;
-    if(!blocked(x,y)) return {x,y};
+    if(!blocked(x,y)&&!treeAt(x,y)) return {x,y};
   }
   for(let i=0; i<500; i++){
     const x = CHAR_R*2 + r()*(WW-CHAR_R*4);
     const y = CHAR_R*2 + r()*(WH-CHAR_R*4);
-    if(!blocked(x,y)) return {x,y};
+    if(!blocked(x,y)&&!treeAt(x,y)) return {x,y};
   }
   return {x:WW*.5, y:WH*.5};
 }
@@ -747,15 +747,20 @@ function blocked(nx,ny) {
     const ex=(nx-cx)/(crx*m+CHAR_R), ey=(ny-cy)/(cry*m+CHAR_R);
     if(ex*ex+ey*ey<1) return true;
   }
-  if(TREE_GRID){
-    const gx=(nx/TREE_CELL)|0, gy=(ny/TREE_CELL)|0;
-    for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
-      const arr=TREE_GRID.get((gx+ox)+','+(gy+oy)); if(!arr) continue;
-      for(const t of arr)
-        if(Math.hypot(nx-t.wx,ny-t.wy)<t.cr+TREE_PAD) return true;
-    }
-  }
   return false;
+}
+// Trees are handled separately from blocked(): update() slides the gnome
+// around a trunk that's in the way instead of stopping him. Returns the
+// blocking tree so the slide can use its centre, or null.
+function treeAt(x,y){
+  if(!TREE_GRID) return null;
+  const gx=(x/TREE_CELL)|0, gy=(y/TREE_CELL)|0;
+  for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
+    const arr=TREE_GRID.get((gx+ox)+','+(gy+oy)); if(!arr) continue;
+    for(const t of arr)
+      if(Math.hypot(x-t.wx,y-t.wy)<t.cr+TREE_PAD) return t;
+  }
+  return null;
 }
 // Mountains don't block movement — they slow it, like climbing a slope.
 // The footprint is an ellipse anchored at the mountain's base (m.x,m.y)
@@ -2312,9 +2317,31 @@ function update(dt){
   fullness=Math.max(0,fullness-dt/FULL_DRAIN_T*((dx||dy)?WALK_DRAIN:1));
   const hungryMul=fullness<HUNGRY_AT?HUNGRY_SPEED:1;
   const spd=SPEED*hungryMul*(wd>0?0.62-0.22*wd:onMountainAt(char.x,char.y)?0.45:pc===3?1.5:pc===2?1.3:pc===1?1.12:1);
-  const nx=clamp(char.x+dx*spd*dt,CHAR_R,WW-CHAR_R), ny=clamp(char.y+dy*spd*dt,CHAR_R,WH-CHAR_R);
+  let mx=dx*spd*dt, my=dy*spd*dt;
+  let nx=clamp(char.x+mx,CHAR_R,WW-CHAR_R), ny=clamp(char.y+my,CHAR_R,WH-CHAR_R);
+  const inTree=treeAt(char.x,char.y);
+  if(inTree){
+    // Safety escape (e.g. spawned overlapping a trunk): walk radially out
+    const rd=Math.hypot(char.x-inTree.wx,char.y-inTree.wy)||1;
+    nx=clamp(char.x+(char.x-inTree.wx)/rd*spd*dt,CHAR_R,WW-CHAR_R);
+    ny=clamp(char.y+(char.y-inTree.wy)/rd*spd*dt,CHAR_R,WH-CHAR_R);
+  } else {
+    const bt=treeAt(nx,ny);
+    if(bt){
+      // Slide around the trunk: strip the movement component pointing
+      // into it, keep the tangential remainder so he keeps moving
+      const rd=Math.hypot(char.x-bt.wx,char.y-bt.wy)||1;
+      const rx=(char.x-bt.wx)/rd, ry=(char.y-bt.wy)/rd;
+      const dot=mx*rx+my*ry;
+      // 0.55: squeezing past a trunk is slower than open walking
+      if(dot<0){ mx=(mx-dot*rx)*0.55; my=(my-dot*ry)*0.55; }
+      nx=clamp(char.x+mx,CHAR_R,WW-CHAR_R); ny=clamp(char.y+my,CHAR_R,WH-CHAR_R);
+      if(treeAt(nx,ny)){ nx=char.x; ny=char.y; } // wedged between two trunks
+    }
+  }
   if(!blocked(nx,ny)){ char.x=nx; char.y=ny; }
-  else { if(!blocked(nx,char.y)) char.x=nx; if(!blocked(char.x,ny)) char.y=ny; }
+  else { if(!blocked(nx,char.y)&&!treeAt(nx,char.y)) char.x=nx;
+         if(!blocked(char.x,ny)&&!treeAt(char.x,ny)) char.y=ny; }
   char.vx=dx*spd; char.vy=dy*spd;
   easeCamera(dt);
   PICK_SPARKS.forEach(s=>{s.age+=dt;s.wx+=s.vx*dt;s.wy+=s.vy*dt;s.vy+=55*dt;});
