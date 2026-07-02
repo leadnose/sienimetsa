@@ -714,6 +714,15 @@ const JR=50;
 canvas.addEventListener('touchstart',e=>{ e.preventDefault(); unlockAudio(); const t=e.changedTouches[0]; joy.active=true;joy.bx=t.clientX;joy.by=t.clientY;joy.dx=0;joy.dy=0; joyBase.style.left=t.clientX+'px';joyBase.style.top=t.clientY+'px';joyBase.style.display='block'; },{passive:false});
 canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.changedTouches[0]; const dx=t.clientX-joy.bx,dy=t.clientY-joy.by; const a=Math.atan2(dy,dx),cl=Math.min(Math.hypot(dx,dy),JR)/JR; joy.dx=Math.cos(a)*cl;joy.dy=Math.sin(a)*cl; joyKnob.style.left=(50+joy.dx*JR)+'px';joyKnob.style.top=(50+joy.dy*JR)+'px'; },{passive:false});
 canvas.addEventListener('touchend', e=>{ e.preventDefault(); joy.active=false;joy.dx=0;joy.dy=0;joyBase.style.display='none'; },{passive:false});
+// Mouse: the gnome simply follows the cursor (no button needed) — the
+// desktop counterpart of the touch joystick. He stops in the dead zone
+// under the cursor, when the pointer leaves the window, or while
+// keyboard/joystick input is active (those take precedence). Touch
+// handlers preventDefault, so no synthetic mouse events interfere.
+const mouse={active:false,cx:0,cy:0};
+window.addEventListener('mousemove',e=>{ mouse.active=true; mouse.cx=e.clientX; mouse.cy=e.clientY; });
+document.addEventListener('mouseleave',()=>{ mouse.active=false; });
+window.addEventListener('blur',()=>{ mouse.active=false; });
 function inputDir() {
   let dx=0,dy=0;
   if(keys['ArrowLeft']||keys['a']||keys['A'])  dx-=1;
@@ -721,6 +730,13 @@ function inputDir() {
   if(keys['ArrowUp']||keys['w']||keys['W'])    dy-=1;
   if(keys['ArrowDown']||keys['s']||keys['S'])  dy+=1;
   if(joy.active){dx+=joy.dx;dy+=joy.dy;}
+  if(dx===0&&dy===0&&mouse.active){
+    // steer toward the cursor; small dead zone so he settles under it
+    // instead of jittering when the cursor is on top of him
+    const mx=mouse.cx-(char.x-cam.x), my=mouse.cy-(char.y-cam.y);
+    const md=Math.hypot(mx,my);
+    if(md>24){ dx=mx/md; dy=my/md; }
+  }
   const l=Math.hypot(dx,dy);
   return l>0?{dx:dx/l,dy:dy/l}:{dx:0,dy:0};
 }
