@@ -676,6 +676,34 @@ const WATER_MAX_DEPTH=0.72;
 // shoulder past trunks in dense stands instead of wedging between them.
 const TREE_PAD=7;
 
+// Fog of war: the minimap only shows where the gnome has been, so mushroom
+// spots stay unknown until explored. A circular sight radius around him is
+// revealed as he walks. Cells are in fractional world coords so the
+// explored area survives window resizes.
+const FOG_N=64;
+const fog=new Uint8Array(FOG_N*FOG_N); // 0 = unexplored … 255 = fully revealed
+const fogCv=document.createElement('canvas'); fogCv.width=FOG_N; fogCv.height=FOG_N;
+const fogCtx=fogCv.getContext('2d');
+let fogDirty=true;
+function revealFog(){
+  // sight circle circumscribes the screen (its diameter is the screen
+  // diagonal, so everything visible on screen gets revealed); beyond it the
+  // fog fades back in over a band out to R2
+  const R=Math.hypot(VW,VH)/2, R2=R*1.35;
+  const cw=WW/FOG_N, ch=WH/FOG_N;
+  const x0=Math.max(0,((char.x-R2)/cw)|0), x1=Math.min(FOG_N-1,((char.x+R2)/cw)|0);
+  const y0=Math.max(0,((char.y-R2)/ch)|0), y1=Math.min(FOG_N-1,((char.y+R2)/ch)|0);
+  for(let gy=y0;gy<=y1;gy++)for(let gx=x0;gx<=x1;gx++){
+    const i=gy*FOG_N+gx;
+    if(fog[i]===255) continue;
+    const dx=(gx+.5)*cw-char.x, dy=(gy+.5)*ch-char.y;
+    const d=Math.hypot(dx,dy);
+    if(d>=R2) continue;
+    const v=d<=R?255:(255*(R2-d)/(R2-R))|0;
+    if(v>fog[i]){ fog[i]=v; fogDirty=true; }
+  }
+}
+
 function findStart() {
   const r = mkRng(mapNum * 7331 + 17);
   // Prefer to begin on a main/side trail (a forest entrance)
@@ -2295,6 +2323,19 @@ function renderMinimap(){
     mmCtx.fillStyle=m.collected?'rgba(120,120,120,.5)':'#cc3838';
     mmCtx.beginPath();mmCtx.arc(m.fx*mw,m.fy*mh,2.5,0,Math.PI*2);mmCtx.fill();
   });
+  // Fog of war: cover whose alpha is the cell's unexplored amount, quantized
+  // to a few steps and scaled up unsmoothed — a chunky pixel-art fade
+  if(fogDirty){
+    const img=fogCtx.createImageData(FOG_N,FOG_N), d=img.data;
+    for(let i=0;i<fog.length;i++){
+      const a=Math.round((255-fog[i])/255*3)*85; // 4 alpha steps
+      d[i*4]=11; d[i*4+1]=14; d[i*4+2]=7; d[i*4+3]=a;
+    }
+    fogCtx.putImageData(img,0,0);
+    fogDirty=false;
+  }
+  mmCtx.imageSmoothingEnabled=false;
+  mmCtx.drawImage(fogCv,0,0,mw,mh);
   mmCtx.strokeStyle='rgba(255,255,255,.88)';mmCtx.lineWidth=1.5;
   mmCtx.strokeRect(cam.x/WW*mw,cam.y/WH*mh,VW/WW*mw,VH/WH*mh);
   mmCtx.fillStyle='#ffe050';mmCtx.strokeStyle='#5a3800';mmCtx.lineWidth=1;
@@ -2366,6 +2407,7 @@ function update(dt){
          if(!blocked(char.x,ny)&&!treeAt(char.x,ny)) char.y=ny; }
   char.vx=dx*spd; char.vy=dy*spd;
   easeCamera(dt);
+  revealFog();
   PICK_SPARKS.forEach(s=>{s.age+=dt;s.wx+=s.vx*dt;s.wy+=s.vy*dt;s.vy+=55*dt;});
   PICK_SPARKS=PICK_SPARKS.filter(s=>s.age<s.life);
   MUSHROOMS.forEach(m=>{
@@ -2458,6 +2500,7 @@ function startGame(){
   document.getElementById('win').classList.remove('show');
   const start=findStart(); char.x=start.x; char.y=start.y; char.vx=0; char.vy=0; char.facing=1;
   snapCam();
+  fog.fill(0); fogDirty=true; revealFog();
 }
 
 document.getElementById('btn-play').addEventListener('click',startGame);
