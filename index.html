@@ -1093,10 +1093,14 @@ function stepNoise(){
     stepBuf=c.createBuffer(1,sr,sr);
     const d=stepBuf.getChannelData(0);
     for(let i=0;i<d.length;i++){
-      if(Math.random()<650/sr){ // ~650 crackles per second
+      if(Math.random()<1100/sr){ // ~1100 crackles per second
         const a=(Math.random()*2-1)*(0.25+Math.random()*0.75);
-        const len=8+(Math.random()*36|0); // spike: a fraction of a ms
-        for(let j=0;j<len&&i+j<d.length;j++) d[i+j]+=a*(1-j/len)**2;
+        // Each crackle is a little hann-windowed (sin²) grain, 1–4ms:
+        // it swells and fades instead of switching on, so a grain reads as
+        // a soft "shf" rather than a click. Long and dense enough that
+        // neighbours overlap into a round continuous rustle.
+        const len=48+(Math.random()*160|0);
+        for(let j=0;j<len&&i+j<d.length;j++) d[i+j]+=a*Math.sin(Math.PI*j/len)**2;
       }
     }
   }
@@ -1105,12 +1109,13 @@ function stepNoise(){
 // One rustle: a random slice of the crackle bed through a broad bandpass.
 // rate re-pitches the crackles wholesale — slower = sparser, fatter snaps
 // (gravel underfoot), faster = finer, crisper ones (bare rock).
-function stepRustle({f,vol,dur,atk=.025,rate=1}){
+function stepRustle({f,vol,dur,atk=.065,rate=1}){
   try{
     const c=ac(), t=c.currentTime;
     const s=c.createBufferSource(); s.buffer=stepNoise(); s.playbackRate.value=rate;
+    // broad low-Q bandpass: any narrower and it rings each grain into a ping
     const flt=c.createBiquadFilter();
-    flt.type='bandpass'; flt.frequency.value=f; flt.Q.value=.7;
+    flt.type='bandpass'; flt.frequency.value=f; flt.Q.value=.6;
     // swell in, hold while the foot settles, then die away — setTargetAtTime
     // for the fade so the tail vanishes naturally instead of trailing
     const g=c.createGain();
@@ -1127,14 +1132,14 @@ function stepRustle({f,vol,dur,atk=.025,rate=1}){
 // band low enough that the crackles smear together into a slosh.
 // STEP_VOL scales every footstep at once — the one number to touch when
 // the whole walk needs to come up or down in the mix.
-const STEP_VOL=1;
+const STEP_VOL=1.25;
 const STEP_SURF={
-  grass: {f:2400,vol:.50,dur:.17,rate:1},
-  sand:  {f:1500,vol:.38,dur:.16,rate:.85},
-  gravel:{f:1800,vol:.52,dur:.15,rate:.6},
-  rock:  {f:3200,vol:.36,dur:.09,rate:1.4},
-  marsh: {f:1000,vol:.48,dur:.20,rate:.75},
-  water: {f:800, vol:.55,dur:.28,rate:.55},
+  grass: {f:1650,vol:.50,dur:.17,rate:1},
+  sand:  {f:1100,vol:.38,dur:.16,rate:.85},
+  gravel:{f:1250,vol:.52,dur:.15,rate:.6},
+  rock:  {f:2200,vol:.36,dur:.10,rate:1.4},
+  marsh: {f:750, vol:.48,dur:.20,rate:.75},
+  water: {f:600, vol:.55,dur:.28,rate:.55},
 };
 // foot alternates 0/1 per stride; a whisper of variation keeps the
 // left-right-left pattern from sounding machine-stamped.
