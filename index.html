@@ -114,7 +114,8 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   <span id="hsep">·</span> <canvas class="hico" id="ico-bil"></canvas> <span id="bcnt">0</span>
   <span id="hsep2">·</span> <canvas class="hico" id="ico-ling"></canvas> <span id="lcnt">0</span>
   <canvas id="hbarcv"></canvas>
-  <canvas class="hico" id="ico-sound" style="cursor:pointer" title="Ääni päällä/pois"></canvas></div>
+  <canvas class="hico" id="ico-sound" style="cursor:pointer" title="Ääni päällä/pois"></canvas>
+  <canvas class="hico" id="ico-music" style="cursor:pointer" title="Musiikki päällä/pois (M)"></canvas></div>
 <div id="mapdisp" title="Valitse kartta"><canvas class="hico" id="ico-map"></canvas> <span id="mapname"></span></div>
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
@@ -892,7 +893,7 @@ window.addEventListener('keydown',e=>{
     else if(e.key==='Escape'&&pickerMode){ e.preventDefault(); closeMapMenu(); }
     return;
   }
-  keys[e.key]=true; unlockAudio(); if(e.key==='q'||e.key==='Q') toggleSound(); if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+  keys[e.key]=true; unlockAudio(); if(e.key==='q'||e.key==='Q') toggleSound(); if(e.key==='m'||e.key==='M') toggleMusic(); if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
 });
 window.addEventListener('keyup',  e=>{ keys[e.key]=false; });
 const joy={active:false,bx:0,by:0,dx:0,dy:0};
@@ -1043,6 +1044,7 @@ function unlockAudio(){
     c.onstatechange=updateSoundIcon;
     if(c.state==='suspended') c.resume().then(updateSoundIcon).catch(()=>{});
     startKeepAlive();
+    startMusic();
     audioUnlocked=true;
   }catch(e){}
   updateSoundIcon();
@@ -1054,7 +1056,7 @@ function toggleSound(){
     const c=ac();
     c.onstatechange=updateSoundIcon;
     if(c.state==='running') c.suspend().then(updateSoundIcon).catch(()=>{});
-    else { c.resume().then(updateSoundIcon).catch(()=>{}); startKeepAlive(); }
+    else { c.resume().then(updateSoundIcon).catch(()=>{}); startKeepAlive(); startMusic(); }
   }catch(e){}
   updateSoundIcon();
 }
@@ -1077,6 +1079,178 @@ function playEat(){ beep(330,.09,.16); setTimeout(()=>beep(262,.12,.14),70); }
 // kept near the pick sounds' register since anything much lower vanishes
 // on small speakers.
 function playBump(){ beep(392,.14,.24); setTimeout(()=>beep(277,.18,.20),50); }
+
+// ── Background music ──────────────────────────────────────────
+// Fully procedural like the sound effects: each map gets its own looping
+// tune, generated deterministically from mapNum so map 3 always hums the
+// same melody. One spec per biome (order matches BIOMES) sets scale,
+// register, tempo and sparseness so the music matches the biome's mood.
+// root = MIDI note; scale = semitone offsets; rest = rhythm sparseness
+// (higher = fewer notes per bar); span = octaves the melody may roam;
+// drone/vol = gains kept well under the 0.22 the effects play at so
+// picks stay in front.
+const MUSIC_DEFS=[
+  {root:55, scale:[0,2,4,7,9],  bpm:100, wave:'triangle', rest:.25, span:2, drone:.020, vol:.055}, // Kotimetsä: warm major pentatonic
+  {root:57, scale:[0,2,5,7,9],  bpm:84,  wave:'sine',     rest:.30, span:2, drone:.022, vol:.055}, // Järviseutu: floating sus-pentatonic
+  {root:52, scale:[0,3,5,7,10], bpm:112, wave:'triangle', rest:.20, span:2, drone:.020, vol:.050}, // Tiheikkö: brisk minor pentatonic
+  {root:62, scale:[0,2,4,7,9],  bpm:96,  wave:'triangle', rest:.30, span:1, drone:.014, vol:.050}, // Kangas: sunny bright major
+  {root:48, scale:[0,2,7,9],    bpm:72,  wave:'sine',     rest:.40, span:2, drone:.024, vol:.055}, // Vaara: open airy fifths
+  {root:50, scale:[0,3,5,7,10], bpm:66,  wave:'sine',     rest:.40, span:1, drone:.026, vol:.050}, // Suo: slow murky minor
+  {root:45, scale:[0,3,5,7,10], bpm:80,  wave:'triangle', rest:.30, span:2, drone:.024, vol:.050}, // Kuusikko: dark low minor
+  {root:69, scale:[0,2,4,7,9],  bpm:104, wave:'sine',     rest:.30, span:1, drone:.016, vol:.050}, // Koivikko: light high major
+  {root:55, scale:[0,2,4,7,10], bpm:108, wave:'triangle', rest:.25, span:2, drone:.020, vol:.050}, // Erämaa: wandering mixolydian
+  {root:57, scale:[0,2,4,8,10], bpm:60,  wave:'sine',     rest:.45, span:2, drone:.026, vol:.050}, // Utumaa: hazy whole-tone drift
+];
+const MUSIC=MUSIC_DEFS[(mapNum-1)%MUSIC_DEFS.length];
+const mFreq=m=>440*Math.pow(2,(m-69)/12);
+// 32-step (4 bars of eighth notes) melody loop. A tune needs a hook, and
+// a random walk never repeats itself — so the loop is built call-and-
+// response instead: one 8-step hook phrase with its own syncopated rhythm
+// signature, arranged A A B A, where B answers by lifting the hook two
+// scale steps and the final A resolves to the root. Hearing the same
+// phrase three times per loop is what makes it stick.
+const MELODY=(()=>{
+  const r=mkRng(mapNum*4111+7), n=MUSIC.scale.length, span=n*MUSIC.span;
+  const clamp=d=>d<0?-d:d>=span?Math.max(0,2*span-2-d):d;
+  // Rhythm signature shared by every bar: the downbeat always sounds,
+  // offbeats are favoured over the remaining onbeats (syncopation), and
+  // the biome's rest level keeps sparse biomes sparse.
+  const hits=[true];
+  for(let i=1;i<8;i++) hits.push(r()<(i%2?.95:.60)-MUSIC.rest);
+  // The hook: a stepwise-leaning walk over that rhythm, starting up on a
+  // high chord tone so the phrase has somewhere to fall from.
+  let deg=clamp(n); const A=[];
+  for(let i=0;i<8;i++){
+    if(!hits[i]){ A.push(null); continue; }
+    A.push(deg);
+    const mv=r();
+    deg=clamp(deg+(mv<.40?1:mv<.75?-1:mv<.88?2:-2));
+  }
+  const shift=k=>A.map(d=>d===null?null:clamp(d+k));
+  const lastHit=p=>{ for(let i=7;i>=0;i--) if(p[i]!==null) return i; return 0; };
+  const B=shift(2), A2=A.slice();
+  A2[lastHit(A2)]=0;
+  return [...A,...A,...B,...A2];
+})();
+const degMidi=d=>MUSIC.root+12*Math.floor(d/MUSIC.scale.length)+MUSIC.scale[d%MUSIC.scale.length];
+let musicOut=null, musicStep=0, musicNextT=0;
+function startMusic(){
+  if(musicOut) return;
+  try{
+    const c=ac(), lp=c.createBiquadFilter();
+    // musicOut is the master mute gain. Melodic voices funnel through a
+    // gentle lowpass into it so they stay mellow; the hat ticks tap in
+    // after the filter (it would swallow them). Effects bypass all of
+    // this and always cut through.
+    musicOut=c.createGain();
+    musicOut.gain.value=musicEnabled?1:0;
+    lp.type='lowpass'; lp.frequency.value=1200;
+    lp.connect(musicOut); musicOut.connect(c.destination);
+    // Continuous root + fifth drone an octave down, fading in over a few
+    // seconds so the music enters unnoticed rather than starting abruptly.
+    for(const semi of [-12,-5]){
+      const o=c.createOscillator(),g=c.createGain();
+      o.type='sine'; o.frequency.value=mFreq(MUSIC.root+semi);
+      g.gain.value=0; g.gain.setTargetAtTime(MUSIC.drone,c.currentTime,3);
+      o.connect(g); g.connect(lp); o.start();
+    }
+    // One continuous legato melody voice: rather than plucking a fresh
+    // oscillator per note, a single always-running oscillator steps
+    // between pitches while its gain swells in on notes and eases away
+    // over rests, so the phrases melt together instead of ticking along.
+    const mo=c.createOscillator(), mg=c.createGain();
+    mo.type=MUSIC.wave; mo.frequency.value=mFreq(degMidi(MELODY[0]));
+    mg.gain.value=0; mo.connect(mg); mg.connect(lp); mo.start();
+    // Funk bass: short plucked notes on a syncopated two-bar pattern.
+    // Values are semitones over the low root — 7 the fifth, 10 the flat
+    // seventh (the mixolydian funk note), 12 an octave pop.
+    const BASSPAT=[0,null,null,12,null,0,null,10, 0,null,0,null,7,null,10,null];
+    function bass(t,semi){
+      const o=c.createOscillator(),g=c.createGain();
+      o.type='triangle'; o.frequency.value=mFreq(MUSIC.root-12+semi);
+      g.gain.setValueAtTime(.0001,t);
+      g.gain.linearRampToValueAtTime(MUSIC.vol*1.15,t+.012);
+      g.gain.setTargetAtTime(.0001,t+.03,.09);
+      o.connect(g); g.connect(lp); o.start(t); o.stop(t+.5);
+    }
+    // Whisper-quiet hat tick from a decaying noise burst, accented on the
+    // offbeats. Routed around the lowpass straight into the mute gain.
+    const nb=c.createBuffer(1,(c.sampleRate*.04)|0,c.sampleRate), nd=nb.getChannelData(0);
+    for(let i=0;i<nd.length;i++) nd[i]=(Math.random()*2-1)*(1-i/nd.length)**2;
+    const hp=c.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000;
+    hp.connect(musicOut);
+    function hat(t,vol){
+      const s=c.createBufferSource(),g=c.createGain();
+      s.buffer=nb; g.gain.value=vol; s.connect(g); g.connect(hp); s.start(t);
+    }
+    // Kick: a sine thump whose pitch drops 110→45Hz — all body, no click,
+    // so it drives the pulse without fighting the bass notes.
+    function kick(t){
+      const o=c.createOscillator(),g=c.createGain();
+      o.type='sine';
+      o.frequency.setValueAtTime(110,t);
+      o.frequency.exponentialRampToValueAtTime(45,t+.10);
+      g.gain.setValueAtTime(.09,t);
+      g.gain.exponentialRampToValueAtTime(.0001,t+.16);
+      o.connect(g); g.connect(musicOut); o.start(t); o.stop(t+.2);
+    }
+    // Snare: the same noise burst as the hats squeezed through a bandpass
+    // — a soft "tss" snap for the backbeats rather than a full crack.
+    const bp=c.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1900; bp.Q.value=.8;
+    bp.connect(musicOut);
+    function snare(t,vol){
+      const s=c.createBufferSource(),g=c.createGain();
+      s.buffer=nb; g.gain.value=vol; s.connect(g); g.connect(bp); s.start(t);
+    }
+    // Lookahead scheduler (the standard WebAudio pattern): a coarse timer
+    // queues sample-accurate automation ~0.35s ahead. While the context is
+    // suspended (mute) currentTime freezes, so this idles and the tune
+    // resumes exactly where it paused on unmute. Offbeat eighths land
+    // ~30% of a step late — swing, which is where the funk lives.
+    musicNextT=c.currentTime+.2;
+    setInterval(()=>{
+      const step=30/MUSIC.bpm;
+      while(musicNextT<c.currentTime+.35){
+        const t=musicNextT+(musicStep%2?step*.31:0), deg=MELODY[musicStep];
+        if(deg!==null){
+          // near-instant pitch change (τ≈8ms): just enough smoothing to
+          // avoid a click, none of the audible scoop a longer glide gave
+          mo.frequency.setTargetAtTime(mFreq(degMidi(deg)),t,.008);
+          // hard dip before the swell re-articulates each note, so the
+          // hook's repeated pitches read as rhythm instead of one long tone
+          mg.gain.setTargetAtTime(MUSIC.vol*.18,t,.010);
+          mg.gain.setTargetAtTime(MUSIC.vol,t+.05,.05);
+        }else{
+          mg.gain.setTargetAtTime(.0001,t,.22);
+        }
+        const b=BASSPAT[musicStep%BASSPAT.length];
+        if(b!==null) bass(t,b);
+        // Drum bar (8 eighth-steps = 4 beats): kick on beat 1 and the
+        // swung "and of 2", snare snap on backbeats 2 & 4, hats with hard
+        // offbeat accents, a 16th double-tick into each new bar, and a
+        // swung kick pickup into every loop repeat.
+        const s8=musicStep%8;
+        if(s8===0||s8===3||musicStep%16===15) kick(t);
+        if(s8===2||s8===6) snare(t,.05);
+        hat(t,musicStep%2?.018:.006);
+        if(s8===7) hat(t+step*.55,.010);
+        musicStep=(musicStep+1)%MELODY.length;
+        musicNextT+=step;
+      }
+    },100);
+  }catch(e){}
+}
+// Music-only mute (M key / note icon): fades the music bus instead of
+// suspending the context, so effects keep playing and the tune stays
+// paused-in-place underneath, ready to fade back in.
+let musicEnabled=true;
+function toggleMusic(){
+  musicEnabled=!musicEnabled;
+  if(musicOut){
+    try{ musicOut.gain.setTargetAtTime(musicEnabled?1:0,ac().currentTime,.05); }catch(e){}
+  }
+  drawMusicIcon(musicEnabled);
+}
 
 // ── HUD pixel icons ───────────────────────────────────────────
 // Drawn once into tiny canvases (upscaled by CSS with pixelated
@@ -1182,6 +1356,21 @@ function updateSoundIcon(){
   if(on===soundIconOn) return;
   soundIconOn=on;
   drawSoundIcon(on);
+}
+// Eighth note in the same 12×12 pixel style and body colour as the speaker;
+// flag goes green when playing, red slash when muted (mirrors drawSoundIcon).
+function drawMusicIcon(on){
+  const cv=document.getElementById('ico-music'); cv.width=12; cv.height=12;
+  const c=cv.getContext('2d'); c.clearRect(0,0,12,12);
+  const body='#5d3200';
+  const note=[[6,1,1,9],[3,8,4,3],[2,9,1,1]]; // stem + head
+  for(const r of note){ c.fillStyle=body; c.fillRect(r[0],r[1],r[2],r[3]); }
+  c.fillStyle=on?'#8ac926':body;
+  c.fillRect(7,1,1,2); c.fillRect(8,2,1,2); c.fillRect(9,4,1,2); // flag
+  if(!on){
+    c.fillStyle='#c02020';
+    for(let i=0;i<12;i++) c.fillRect(10-i,i,3,1);
+  }
 }
 
 // ── DOM effects ───────────────────────────────────────────────
@@ -3374,6 +3563,8 @@ initHudIcons();
 hudIcon('ico-map', MAP_ICONS[(mapNum-1)%MAP_ICONS.length]);
 updateSoundIcon();
 document.getElementById('ico-sound').addEventListener('click',e=>{ e.stopPropagation(); toggleSound(); });
+document.getElementById('ico-music').addEventListener('click',e=>{ e.stopPropagation(); unlockAudio(); toggleMusic(); });
+drawMusicIcon(musicEnabled);
 document.getElementById('mapdisp').addEventListener('click',()=>{ if(!gameWon) openMapMenu(); });
 document.getElementById('win').addEventListener('click',e=>{ if(pickerMode&&e.target.id==='win') closeMapMenu(); });
 // statechange doesn't fire in every engine (seen on some WebViews), so poll
