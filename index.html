@@ -535,16 +535,16 @@ function buildWorld() {
   // the highlands around the mountain cluster centre (mCX,mCY); broadleaf and
   // mixed stands fill the lowlands. Edit `n` to tune density per stand.
   const STANDS=[
-    {n:2000, gen:()=>({x:r()*.42,                       y:.50+r()*.48,                  t:TR_DECIDUOUS,                 m:0.8+r()*.5})},
-    {n: 960, gen:()=>({x:clamp(mCX-.15+r()*.30,0,1),    y:r()*.55,                      t:TR_PINE,                      m:0.8+r()*.4})},
-    {n: 600, gen:()=>({x:clamp(mCX+r()*.40,0,1),        y:clamp(mCY+r()*.35,0,.55),     t:TR_PINE,                      m:0.7+r()*.5})},
-    {n:1500, gen:()=>({x:r(),                           y:r(),                          t:r()>.45?TR_PINE:TR_DECIDUOUS, m:0.7+r()*.6})},
-    {n: 720, gen:()=>({x:r()*.44,                       y:r()*.58,                      t:TR_SPRUCE,                    m:0.7+r()*1.1})},
-    {n: 600, gen:()=>({x:clamp(mCX-.1+r()*.45,0,1),     y:r()*.48,                      t:TR_SPRUCE,                    m:0.8+r()*1.0})},
-    {n: 440, gen:()=>({x:r(),                           y:r(),                          t:TR_SPRUCE,                    m:0.5+r()*1.2})},
-    {n: 680, gen:()=>({x:r(),                           y:r(),                          t:TR_FIR,                       m:0.7+r()*.8})},
-    {n: 360, gen:()=>({x:r()*.38,                       y:.52+r()*.42,                  t:TR_FIR,                       m:0.9+r()*.9})},
-    {n: 460, gen:()=>({x:r(),                           y:r(),                          t:TR_SCOTS,                     m:0.9+r()*.9})},
+    {n:3000, gen:()=>({x:r()*.42,                       y:.50+r()*.48,                  t:TR_DECIDUOUS,                 m:0.8+r()*.5})},
+    {n:1440, gen:()=>({x:clamp(mCX-.15+r()*.30,0,1),    y:r()*.55,                      t:TR_PINE,                      m:0.8+r()*.4})},
+    {n: 900, gen:()=>({x:clamp(mCX+r()*.40,0,1),        y:clamp(mCY+r()*.35,0,.55),     t:TR_PINE,                      m:0.7+r()*.5})},
+    {n:2250, gen:()=>({x:r(),                           y:r(),                          t:r()>.45?TR_PINE:TR_DECIDUOUS, m:0.7+r()*.6})},
+    {n:1080, gen:()=>({x:r()*.44,                       y:r()*.58,                      t:TR_SPRUCE,                    m:0.7+r()*1.1})},
+    {n: 900, gen:()=>({x:clamp(mCX-.1+r()*.45,0,1),     y:r()*.48,                      t:TR_SPRUCE,                    m:0.8+r()*1.0})},
+    {n: 660, gen:()=>({x:r(),                           y:r(),                          t:TR_SPRUCE,                    m:0.5+r()*1.2})},
+    {n:1020, gen:()=>({x:r(),                           y:r(),                          t:TR_FIR,                       m:0.7+r()*.8})},
+    {n: 540, gen:()=>({x:r()*.38,                       y:.52+r()*.42,                  t:TR_FIR,                       m:0.9+r()*.9})},
+    {n: 690, gen:()=>({x:r(),                           y:r(),                          t:TR_SCOTS,                     m:0.9+r()*.9})},
   ];
   TREES = [];
   for(const {n,gen} of STANDS) for(let i=0;i<n;i++) TREES.push(gen());
@@ -581,7 +581,7 @@ function buildWorld() {
     for(let oy=-1;oy<=1;oy++) for(let ox=-1;ox<=1;ox++){
       const arr=placeGrid.get((gx+ox)+','+(gy+oy)); if(!arr) continue;
       for(const o of arr)
-        if(Math.hypot(wx-o.wx,wy-o.wy)<(sz+o.sz)*0.30) return false;
+        if(Math.hypot(wx-o.wx,wy-o.wy)<(sz+o.sz)*0.22) return false;
     }
     const k=gx+','+gy; let arr=placeGrid.get(k); if(!arr){arr=[];placeGrid.set(k,arr);}
     arr.push({wx,wy,sz});
@@ -676,6 +676,17 @@ const WATER_MAX_DEPTH=0.72;
 // Trees use a smaller collision pad than walls/water so the character can
 // shoulder past trunks in dense stands instead of wedging between them.
 const TREE_PAD=7;
+// Bumping a trunk: how long the sway animation lasts, and the minimum gap
+// between retriggers while he's shoved up against the same tree. BEND_HIT_PAD
+// is deliberately much more generous than TREE_PAD — it's just how close he
+// needs to be to set a trunk swaying, separate from the tighter radius that
+// actually blocks movement, so a bump reads as an area around the tree
+// rather than a pixel-precise poke at its exact centre.
+const BEND_DUR=0.6, BEND_COOLDOWN=0.6, BEND_HIT_PAD=90;
+// Trunk Gubbe was pressed against last frame — the bump sound edge-triggers
+// on this changing, so a new contact always thonks no matter what any
+// timestamp says.
+let bumpTree=null;
 
 function findStart() {
   const r = mkRng(mapNum * 7331 + 17);
@@ -706,7 +717,7 @@ function easeCamera(dt) {
 
 // ── Input ─────────────────────────────────────────────────────
 const keys={};
-window.addEventListener('keydown',e=>{ keys[e.key]=true; unlockAudio(); if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); });
+window.addEventListener('keydown',e=>{ keys[e.key]=true; unlockAudio(); if(e.key==='q'||e.key==='Q') toggleSound(); if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); });
 window.addEventListener('keyup',  e=>{ keys[e.key]=false; });
 const joy={active:false,bx:0,by:0,dx:0,dy:0};
 const joyBase=document.getElementById('joy-base');
@@ -754,7 +765,7 @@ function buildTreeGrid(){
     const wx=tr.x*WW, wy=tr.y*WH, cr=Math.max(2,treeSz*tr.m*0.07);
     const gx=(wx/TREE_CELL)|0, gy=(wy/TREE_CELL)|0, k=gx+','+gy;
     let arr=TREE_GRID.get(k); if(!arr){arr=[];TREE_GRID.set(k,arr);}
-    arr.push({wx,wy,cr});
+    arr.push({wx,wy,cr,tr});
   }
 }
 function blocked(nx,ny) {
@@ -784,6 +795,22 @@ function treeAt(x,y){
       if(Math.hypot(x-t.wx,y-t.wy)<t.cr+TREE_PAD) return t;
   }
   return null;
+}
+// Wider, purely cosmetic radius: every trunk within BEND_HIT_PAD of a bump
+// sways, not just whichever one the tight movement collider names — so
+// clipping the edge of a cluster's canopy sets the whole group nodding.
+function treesNear(x,y,pad){
+  if(!TREE_GRID) return [];
+  // scan enough cells to cover pad even when it outgrows the 1-cell margin
+  // TREE_CELL was originally sized for (trunk radius + TREE_PAD)
+  const reach=Math.ceil(pad/TREE_CELL)+1;
+  const gx=(x/TREE_CELL)|0, gy=(y/TREE_CELL)|0, out=[];
+  for(let oy=-reach;oy<=reach;oy++) for(let ox=-reach;ox<=reach;ox++){
+    const arr=TREE_GRID.get((gx+ox)+','+(gy+oy)); if(!arr) continue;
+    for(const t of arr)
+      if(Math.hypot(x-t.wx,y-t.wy)<t.cr+pad) out.push(t);
+  }
+  return out;
 }
 // Mountains don't block movement — they slow it, like climbing a slope.
 // The footprint is an ellipse anchored at the mountain's base (m.x,m.y)
@@ -817,6 +844,25 @@ function waterDepthAt(x,y){
 // ── Audio ─────────────────────────────────────────────────────
 let aCtx, audioUnlocked=false;
 function ac(){if(!aCtx)aCtx=new(window.AudioContext||window.webkitAudioContext)();return aCtx;}
+// Keep-alive: some audio outputs (Bluetooth headsets, HDMI receivers,
+// OS "enhancement" processing) power down after a moment of silence and
+// swallow the first ~100ms of the next sound while waking — longer than a
+// whole one-shot effect like the tree-bump thonk, which then never gets
+// heard at all. A perpetual, inaudible source keeps the output stream open
+// so short effects always play from their first sample. 30Hz at 0.001 gain
+// is below both hearing and small-speaker range, but nonzero so the graph
+// can't be optimized away as silent.
+let keepAliveOsc=null;
+function startKeepAlive(){
+  if(keepAliveOsc) return;
+  try{
+    const c=ac(), o=c.createOscillator(), g=c.createGain();
+    o.connect(g); g.connect(c.destination);
+    o.frequency.value=30; g.gain.value=0.001;
+    o.start();
+    keepAliveOsc=o;
+  }catch(e){}
+}
 // iOS/Safari start the AudioContext suspended until a user gesture; resume it
 // on the first touch/key so the first pick-sound isn't swallowed.
 function unlockAudio(){
@@ -825,6 +871,7 @@ function unlockAudio(){
     const c=ac();
     c.onstatechange=updateSoundIcon;
     if(c.state==='suspended') c.resume().then(updateSoundIcon).catch(()=>{});
+    startKeepAlive();
     audioUnlocked=true;
   }catch(e){}
   updateSoundIcon();
@@ -836,7 +883,7 @@ function toggleSound(){
     const c=ac();
     c.onstatechange=updateSoundIcon;
     if(c.state==='running') c.suspend().then(updateSoundIcon).catch(()=>{});
-    else c.resume().then(updateSoundIcon).catch(()=>{});
+    else { c.resume().then(updateSoundIcon).catch(()=>{}); startKeepAlive(); }
   }catch(e){}
   updateSoundIcon();
 }
@@ -852,6 +899,13 @@ function playPick(){
 function playWin(){[523,659,784,1047,784,1047,1319].forEach((f,i)=>setTimeout(()=>beep(f,.35),i*150));}
 // soft low "nom-nom" — clearly distinct from the bright mushroom arpeggio
 function playEat(){ beep(330,.09,.16); setTimeout(()=>beep(262,.12,.14),70); }
+// dull descending "bonk" for bumping into a tree trunk — built from the
+// same beep() primitive as the pick/eat sounds, which are the ones proven
+// to play reliably in-game (hand-scheduled oscillator versions of this
+// sound never sounded in the game loop). Two falling notes read as wood,
+// kept near the pick sounds' register since anything much lower vanishes
+// on small speakers.
+function playBump(){ beep(392,.14,.24); setTimeout(()=>beep(277,.18,.20),50); }
 
 // ── HUD pixel icons ───────────────────────────────────────────
 // Drawn once into tiny canvases (upscaled by CSS with pixelated
@@ -2006,30 +2060,46 @@ function drawHill(m){
 }
 
 // ── Tree draw (sprite blit) ───────────────────────────────────
-function drawRoundTree(wx,wy,sz,v=0){
+// Bonk sway: when tr carries a recent bendT (set by update() on trunk
+// collision), shear the sprite about its base so the crown springs away
+// from the character and rings back, decaying to a still trunk.
+function drawTreeSpr(s,x,y,r,tr){
+  const dt=tr?gameTime-tr.bendT:Infinity;
+  if(!(dt>=0&&dt<BEND_DUR)){ pixCtx.drawImage(s.cv,x-s.ox,y-s.oy); return; }
+  // cosine so the lean is at its most extreme right at impact (dt=0), then
+  // springs back past centre and rings out — reads as a solid shove rather
+  // than a faint tremor.
+  const amt=Math.cos(dt*20)*Math.exp(-dt*6)*tr.bendDx*Math.min(22,r*1.3);
+  pixCtx.save();
+  pixCtx.translate(x,y);
+  pixCtx.transform(1,0,-amt/s.oy,1,0,0);
+  pixCtx.drawImage(s.cv,-s.ox,-s.oy);
+  pixCtx.restore();
+}
+function drawRoundTree(wx,wy,sz,v=0,tr){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r*2<0||x-r*2>pixW||y+r<0||y-r*4>pixH) return;
-  const s=getTreeSpr(TR_DECIDUOUS,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_DECIDUOUS,r,v); drawTreeSpr(s,x,y,r,tr);
 }
-function drawPineTree(wx,wy,sz,v=0){
+function drawPineTree(wx,wy,sz,v=0,tr){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r<0||x-r>pixW||y<0||y-r*4>pixH) return;
-  const s=getTreeSpr(TR_PINE,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_PINE,r,v); drawTreeSpr(s,x,y,r,tr);
 }
-function drawSpruce(wx,wy,sz,v=0){
+function drawSpruce(wx,wy,sz,v=0,tr){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz*.72/PS)|0);
   if(x+r+2<0||x-r-2>pixW||y<0||y-r*5>pixH) return;
-  const s=getTreeSpr(TR_SPRUCE,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_SPRUCE,r,v); drawTreeSpr(s,x,y,r,tr);
 }
-function drawBroadFir(wx,wy,sz,v=0){
+function drawBroadFir(wx,wy,sz,v=0,tr){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz*1.10/PS)|0);
   if(x+r+3<0||x-r-3>pixW||y<0||y-r*3>pixH) return;
-  const s=getTreeSpr(TR_FIR,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_FIR,r,v); drawTreeSpr(s,x,y,r,tr);
 }
-function drawScotsPine(wx,wy,sz,v=0){
+function drawScotsPine(wx,wy,sz,v=0,tr){
   const x=wpx(wx),y=wpy(wy),r=Math.max(4,(sz/PS)|0);
   if(x+r*2<0||x-r*2>pixW||y<0||y-r*5>pixH) return;
-  const s=getTreeSpr(TR_SCOTS,r,v); pixCtx.drawImage(s.cv,x-s.ox,y-s.oy);
+  const s=getTreeSpr(TR_SCOTS,r,v); drawTreeSpr(s,x,y,r,tr);
 }
 
 // ── Shrub ─────────────────────────────────────────────────────
@@ -2381,10 +2451,10 @@ function drawPlant(x,y,t,eaten){
   }
 }
 
-function drawVegetation(){
+function drawVegetation(charItem){
   const pad=Math.min(WW,WH)*.15;
   const x0=cam.x-pad,x1=cam.x+VW+pad,y0=cam.y-pad,y1=cam.y+VH+pad;
-  const items=[];
+  const items=[charItem];
   UNDERSTORY.forEach(u=>{
     const ux=u.x*WW,uy=u.y*WH;
     if(ux>x0&&ux<x1&&uy>y0&&uy<y1) items.push({wy:uy,fn:()=>drawPlant(wpx(ux),wpy(uy),u.t,u.eaten)});
@@ -2398,11 +2468,11 @@ function drawVegetation(){
     if(tx>x0&&tx<x1&&ty>y0&&ty<y1){
       const sz=treeSz*tr.m;
       items.push({wy:ty,fn:
-        tr.t===TR_DECIDUOUS?()=>drawRoundTree(tx,ty,sz,tr.v):
-        tr.t===TR_PINE     ?()=>drawPineTree(tx,ty,sz,tr.v):
-        tr.t===TR_SPRUCE   ?()=>drawSpruce(tx,ty,sz,tr.v):
-        tr.t===TR_FIR      ?()=>drawBroadFir(tx,ty,sz,tr.v):
-                            ()=>drawScotsPine(tx,ty,sz,tr.v)});
+        tr.t===TR_DECIDUOUS?()=>drawRoundTree(tx,ty,sz,tr.v,tr):
+        tr.t===TR_PINE     ?()=>drawPineTree(tx,ty,sz,tr.v,tr):
+        tr.t===TR_SPRUCE   ?()=>drawSpruce(tx,ty,sz,tr.v,tr):
+        tr.t===TR_FIR      ?()=>drawBroadFir(tx,ty,sz,tr.v,tr):
+                            ()=>drawScotsPine(tx,ty,sz,tr.v,tr)});
     }
   });
   items.sort((a,b)=>a.wy-b.wy);
@@ -2464,7 +2534,8 @@ function render(){
   drawRivers();
   drawWaters();
   MOUNT_DEF.slice().sort((a,b)=>b.s-a.s).forEach(m=>drawHill(m));
-  drawVegetation();
+  const moving=Math.abs(char.vx)>5||Math.abs(char.vy)>5;
+  drawVegetation({wy:char.y,fn:()=>drawGnome(char.x,char.y,gameTime,moving)});
   MUSHROOMS.forEach(m=>drawMushroom(m));
   PICK_SPARKS.forEach(s=>{
     const px=wpx(s.wx),py=wpy(s.wy);
@@ -2473,8 +2544,6 @@ function render(){
     pixCtx.fillStyle=`rgb(${s.col[0]},${s.col[1]},${s.col[2]})`;
     pixCtx.fillRect(px,py,sz,sz);
   });
-  const moving=Math.abs(char.vx)>5||Math.abs(char.vy)>5;
-  drawGnome(char.x,char.y,gameTime,moving);
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(pixCv,0,0,VW,VH);
   renderMinimap();
@@ -2514,6 +2583,7 @@ function update(dt){
     ny=clamp(char.y+(char.y-inTree.wy)/rd*spd*dt,CHAR_R,WH-CHAR_R);
   } else {
     const bt=treeAt(nx,ny);
+    let touching=null;
     if(bt){
       // Slide around the trunk: strip the movement component pointing
       // into it, keep the tangential remainder so he keeps moving
@@ -2521,10 +2591,33 @@ function update(dt){
       const rx=(char.x-bt.wx)/rd, ry=(char.y-bt.wy)/rd;
       const dot=mx*rx+my*ry;
       // 0.55: squeezing past a trunk is slower than open walking
-      if(dot<0){ mx=(mx-dot*rx)*0.55; my=(my-dot*ry)*0.55; }
+      if(dot<0){
+        mx=(mx-dot*rx)*0.55; my=(my-dot*ry)*0.55;
+        // Bonk: every trunk within the wider BEND_HIT_PAD radius sways away
+        // from him for a moment. Per-tree bendT keeps any one trunk from
+        // re-swaying every frame while he's shoved up against the bark.
+        for(const t of treesNear(char.x,char.y,BEND_HIT_PAD)){
+          if(t.tr&&(t.tr.bendT===undefined||gameTime-t.tr.bendT>BEND_COOLDOWN)){
+            const brd=Math.hypot(char.x-t.wx,char.y-t.wy)||1;
+            t.tr.bendT=gameTime; t.tr.bendDx=-(char.x-t.wx)/brd;
+          }
+        }
+        // The thud edge-triggers on contact: pressing into a different
+        // trunk than last frame (or the same one after backing off) is a
+        // fresh bump and always sounds — the timestamp only rate-limits,
+        // it can never mute a new contact. Leaning steadily on one trunk
+        // re-thonks every BEND_COOLDOWN.
+        touching=bt.tr;
+        const since=gameTime-(bt.tr.bumpSndT||0);
+        if(since>BEND_COOLDOWN||(bumpTree!==bt.tr&&since>0.15)){
+          bt.tr.bumpSndT=gameTime;
+          playBump();
+        }
+      }
       nx=clamp(char.x+mx,CHAR_R,WW-CHAR_R); ny=clamp(char.y+my,CHAR_R,WH-CHAR_R);
       if(treeAt(nx,ny)){ nx=char.x; ny=char.y; } // wedged between two trunks
     }
+    bumpTree=touching;
   }
   if(!blocked(nx,ny)){ char.x=nx; char.y=ny; }
   else { if(!blocked(nx,char.y)&&!treeAt(nx,char.y)) char.x=nx;
