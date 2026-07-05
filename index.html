@@ -676,34 +676,6 @@ const WATER_MAX_DEPTH=0.72;
 // shoulder past trunks in dense stands instead of wedging between them.
 const TREE_PAD=7;
 
-// Fog of war: the minimap only shows where the gnome has been, so mushroom
-// spots stay unknown until explored. A circular sight radius around him is
-// revealed as he walks. Cells are in fractional world coords so the
-// explored area survives window resizes.
-const FOG_N=64;
-const fog=new Uint8Array(FOG_N*FOG_N); // 0 = unexplored … 255 = fully revealed
-const fogCv=document.createElement('canvas'); fogCv.width=FOG_N; fogCv.height=FOG_N;
-const fogCtx=fogCv.getContext('2d');
-let fogDirty=true;
-function revealFog(){
-  // sight circle circumscribes the screen (its diameter is the screen
-  // diagonal, so everything visible on screen gets revealed); beyond it the
-  // fog fades back in over a band out to R2
-  const R=Math.hypot(VW,VH)/2, R2=R*1.35;
-  const cw=WW/FOG_N, ch=WH/FOG_N;
-  const x0=Math.max(0,((char.x-R2)/cw)|0), x1=Math.min(FOG_N-1,((char.x+R2)/cw)|0);
-  const y0=Math.max(0,((char.y-R2)/ch)|0), y1=Math.min(FOG_N-1,((char.y+R2)/ch)|0);
-  for(let gy=y0;gy<=y1;gy++)for(let gx=x0;gx<=x1;gx++){
-    const i=gy*FOG_N+gx;
-    if(fog[i]===255) continue;
-    const dx=(gx+.5)*cw-char.x, dy=(gy+.5)*ch-char.y;
-    const d=Math.hypot(dx,dy);
-    if(d>=R2) continue;
-    const v=d<=R?255:(255*(R2-d)/(R2-R))|0;
-    if(v>fog[i]){ fog[i]=v; fogDirty=true; }
-  }
-}
-
 function findStart() {
   const r = mkRng(mapNum * 7331 + 17);
   // Prefer to begin on a main/side trail (a forest entrance)
@@ -2103,110 +2075,220 @@ function drawMushroom(m){
   });
 }
 
-// ── Metsätonttu (forest gnome) ────────────────────────────────
-// AoE2-style pixel character: lit/shadow faces on every element, tall
-// drooping red cap (tip leans toward facing), huge shaded white beard,
-// round red nose, woolen tunic, stubby boots. 4-frame walk with swinging
-// mittens; the white cap-pom sways gently when idle.
+// ── Sienestäjä (jolly old mushroom forager) ───────────────────
+// A regular old fellow out picking mushrooms: big belly in a woolen
+// orange sweater, short grey beard and bushy brows around a beaming face
+// (twinkly eyes, rosy cheeks, wide grin), long-toed red leather shoes,
+// a wide-brimmed felt hat that pops loose on every hop, and a wicker
+// basket on his forearm that visibly fills with mushrooms. AoE2-style
+// lit/shadow faces on every element. His walk is a light,
+// dilly-dallying skip — springy steps kicking his toes up, with a
+// higher spring every fourth — and idle he rocks on his heels humming,
+// glances about, and does the odd heel-click hop.
 const GN={
-  capL:'#e23030', cap:'#c01c1c', capD:'#7c0e0e',     // pointed cap
-  beardL:'#f4f1e6', beard:'#ddd8c6', beardD:'#b3ad97',// beard
-  skin:'#e3b083', nose:'#d2705e', noseL:'#e8907e',    // face / nose
-  tunic:'#46603a', tunicD:'#2e4226',                  // woolen tunic
-  belt:'#3a2410', boot:'#3a2812', bootD:'#241808',    // belt / boots
-  pomS:'#a8a290',
+  hatL:'#b18a3c', hat:'#7a5c28', hatD:'#3a2810', band:'#241806', // felt hat
+  beardL:'#eeeade', beard:'#b4b0a2', beardD:'#6e6a5e',           // grey beard/hair
+  skin:'#f4c290', skinL:'#ffdcae', skinD:'#c68e58', cheek:'#f07868', // face / hands
+  nose:'#e05a40', noseL:'#ffa082', mouth:'#5e2a1a', eye:'#1a0f08',
+  tunicL:'#ffc24e', tunic:'#d3761a', tunicD:'#6e3806',           // woolen sweater
+  belt:'#331c06', boot:'#c8281c', bootL:'#f0563c', bootD:'#571109', // belt / pointed shoes
+  pant:'#6b5138', pantL:'#82684a', pantD:'#48331f',              // wool trousers
+  basL:'#c89238', bas:'#b8860b', basW:'#a87428', basD:'#5e3c0e', // wicker basket (HUD icon colours)
 };
 function drawGnome(wx,wy,t,moving){
   const cx=wpx(wx), cy=wpy(wy);
   const f=char.facing;  // 1=right, -1=left
-  const s=Math.max(1,Math.min(2,(Math.min(VW,VH)*.006/PS)|0));
-  const frame=moving?Math.floor(t*7)%4:0;
-  const bob=(frame===1||frame===3)?-1:0;
+  // Fine sprite grid (~48 units tall — double the old resolution), so the
+  // scale stays near 1 and every unit is a real drawn pixel of detail.
+  const s=Math.max(.45,Math.min(1.05,Math.min(VW,VH)*.00315/PS));
+
+  // ── One gait phase drives every moving part ──
+  // bob: whole-body spring (screen px); lf/rf: foot kicks; aw: arm swing;
+  // hd: head sway; eo: where the eyes look.
+  let bob=0, lf=0, rf=0, aw=0, hd=0, eo=1;
+  if(moving){
+    const ph=t*11, swv=Math.sin(ph);
+    const skip=(Math.floor(ph/Math.PI)&3)===3?1:0;      // every 4th step springs higher
+    bob=-Math.round(Math.abs(swv)*(1.2+skip)*2*s);      // light bounce on each step
+    lf=swv>0.2?-4:0; rf=swv<-0.2?-4:0;                  // toes kick up high
+    aw=Math.round(swv*4);                               // arms swing wide
+    hd=Math.round(Math.sin(ph-0.6)*2);                  // head sways a beat behind
+  } else {
+    const cyc=t%7;                                      // an occasional heel-click hop
+    if(cyc>6.1&&cyc<6.5) bob=-Math.round(Math.sin((cyc-6.1)/0.4*Math.PI)*6*s);
+    const rock=Math.sin(t*1.6);                         // rocking on his heels, humming
+    hd=Math.round(rock*2);
+    aw=Math.round(rock*2);
+    if(bob<-2*s) lf=rf=-2;                              // tucks his feet mid-hop
+    eo=[0,1,0,-1][Math.floor(t/2.6)%4];                 // glances about the forest
+  }
+  const hatDy=bob<-2*s?-2:0;                            // hat pops loose at the top of a hop
 
   // Wading: the deeper into a pond, the more of the body sinks below the
   // waterline. submerge is in sprite units counted up from the feet (dy=0);
-  // at the capped max depth (~13 units) only the cap/face stay above water.
+  // at the capped max depth only the chest/beard/face/hat stay above water.
   const wd=waterDepthAt(wx,wy);
-  const submerge=wd*13;
+  const submerge=wd*30;
 
   // sp: place rect at (dx,dy) units from feet centre, flipping for facing.
   // dx is the left edge in facing-right space; positive dx leans toward facing.
   // Clipped to the part still above the waterline (dy is negative-up).
+  // The scale s can be fractional: rounding each scaled *edge* (rather than
+  // position + size) keeps neighbouring rects seamless and pixel-crisp.
   function sp(dx,dy,w,h,c){
     const visH=Math.min(h,(-submerge)-dy);
     if(visH<=0) return;
-    const x0=f>0?cx+dx*s:cx-(dx+w)*s;
-    pr(x0,(cy+dy*s)+bob,w*s,visH*s,c);
+    const xa=Math.round(dx*s), xb=Math.round((dx+w)*s);
+    const ya=Math.round(dy*s), yb=Math.round((dy+visH)*s);
+    pr(f>0?cx+xa:cx-xb, cy+ya+bob, xb-xa, yb-ya, c);
   }
+  // Head parts sway together by hd
+  const hp=(dx,dy,w,h,c)=>sp(dx+hd,dy,w,h,c);
 
-  // Ground shadow (wide & stout) — there's no shadow to cast while wading
+  // World light comes from the upper-left, same as the baked tree sprites.
+  // The sprite mirrors with facing, which would carry its lit side to the
+  // wrong screen side — so directional lit/shadow accents resolve against
+  // the flip: L.* is whatever colour keeps bright on the screen-left.
+  const L=f>0
+    ?{tL:GN.tunicL,tD:GN.tunicD,hL:GN.hatL,hD:GN.hatD,bL:GN.beardL,
+      bD:GN.beardD,sL:GN.skinL,sD:GN.skinD,pL:GN.pantL,pD:GN.pantD}
+    :{tL:GN.tunicD,tD:GN.tunicL,hL:GN.hatD,hD:GN.hatL,bL:GN.beardD,
+      bD:GN.beardL,sL:GN.skinD,sD:GN.skinL,pL:GN.pantD,pD:GN.pantL};
+
+  // Ground shadow — narrows when he springs off it; none while wading
   if(wd<=0){
-    const sh=Math.max(1,s>>1);
-    pr(cx-s*4,cy,s*8,sh,'#203808');
+    const sh=Math.max(1,Math.round(s)), shw=Math.round((bob<-2*s?6:8)*s);
+    pr(cx-shw,cy,shw*2,sh,'#203808');
   }
 
-  // Walk: stubby feet alternate a lift; mittens swing opposite
-  const lf=frame===1?-1:0, rf=frame===3?-1:0;
-  const aw=frame===1?-1:frame===3?1:0;
+  // ── Wool trouser legs (from under the hem down to the boots;
+  // they shorten as a foot kicks up, like a lifting knee) ──
+  sp(-9,-14,4,10+lf,GN.pant);
+  sp(-9,-14,1,10+lf,L.pL); sp(-6,-14,1,10+lf,L.pD);
+  sp( 5,-14,4,10+rf,GN.pant);
+  sp( 5,-14,1,10+rf,L.pL); sp( 8,-14,1,10+rf,L.pD);
 
-  // ── Boots (peek beneath the beard) ──
-  sp(-3,-2+lf, 3,2, GN.boot);  sp(-3,-2+lf, 3,1, GN.bootD);
-  sp( 1,-2+rf, 3,2, GN.boot);  sp( 1,-2+rf, 3,1, GN.bootD);
-
-  // ── Woolen tunic (slightly stout) ──
-  sp(-3,-11, 7,9, GN.tunic);
-  sp( 2,-11, 2,9, GN.tunicD);   // right shadow face
-  sp(-3, -3, 7,1, GN.tunicD);   // hem shadow
-  sp(-3,-11, 1,9, GN.beardL);   // faint lit left edge
-
-  // Belt + brass buckle (sides peek past the beard)
-  sp(-3,-6, 7,1, GN.belt);
-  sp(-1,-7, 2,2, '#d4a010');
-  sp( 0,-7, 1,1, '#f0c030');
-
-  // ── Arms + mitten hands at the sides ──
-  sp(-4,-10, 2,4, GN.tunic);  sp(-4,-10, 1,4, GN.tunicD);
-  sp( 5,-10, 2,4, GN.tunic);  sp( 6,-10, 1,4, GN.tunicD);
-  sp(-4,-6+aw, 2,2, GN.cap);  sp(-4,-6+aw, 1,2, GN.capD);   // left mitten
-  sp( 5,-6-aw, 2,2, GN.cap);  sp( 6,-6-aw, 1,2, GN.capD);   // right mitten
-
-  // ── Face patch (only nose shows; eyes hidden under the cap) ──
-  sp(-2,-16, 4,3, GN.skin);
-  sp( 1,-16, 1,3, '#c8966a');  // cheek shadow
-
-  // ── Huge white beard (triangular, drawn over the tunic) ──
-  const beardRows=[[-14,4],[-13,5],[-12,6],[-11,6],[-10,6],[-9,5],[-8,5],[-7,4],[-6,4],[-5,3],[-4,2]];
-  beardRows.forEach(([dy,w])=>{
+  // ── Big round belly in a woolen sweater (lit left, shadowed right) ──
+  const belly=[[-10,16],[-11,18],[-12,19],[-13,20],[-14,20],[-15,20],[-16,20],
+               [-17,20],[-18,19],[-19,18],[-20,17],[-21,16],[-22,15],
+               [-23,14],[-24,13],[-25,12],[-26,12]];
+  belly.forEach(([dy,w])=>{
     const dx=-(w>>1);
-    sp(dx,      dy, w,1, GN.beard);
-    sp(dx,      dy, 1,1, GN.beardL);   // lit left edge
-    sp(dx+w-1,  dy, 1,1, GN.beardD);   // shadow right edge
+    sp(dx,dy,w,1,GN.tunic);
+    sp(dx,dy,2,1,L.tL);                // lit left face
+    sp(dx+w-3,dy,3,1,L.tD);            // shadow right face
   });
-  sp(-1,-13, 1,7, GN.beardD);          // central strand groove
-  sp( 1,-12, 1,5, GN.beardD);          // side strand groove
+  // Ribbed knit hem
+  sp(-9,-11,18,1,GN.tunicD); sp(-8,-10,16,1,GN.tunicD);
+  for(let i=-7;i<7;i+=2){ sp(i,-11,1,1,GN.tunic); sp(i,-10,1,1,GN.tunic); }
+  // Patch sewn on the belly, stitched at the corners
+  sp(5,-19,4,4,GN.tunicL);
+  sp(5,-19,1,1,GN.tunicD); sp(8,-19,1,1,GN.tunicD);
+  sp(5,-16,1,1,GN.tunicD); sp(8,-16,1,1,GN.tunicD);
 
-  // ── Round red nose (pokes out between cap and beard) ──
-  sp(-1,-15, 2,2, GN.nose);
-  sp(-1,-15, 1,1, GN.noseL);
+  // Belt strains low under the belly, brass buckle gleaming
+  sp(-10,-15,20,2,GN.belt);
+  sp(-2,-16,4,4,'#d4a010');            // buckle frame
+  sp(-1,-15,2,2,GN.belt);              // …around the strap
+  sp(-1,-16,1,1,'#f0c030');            // pin catches the light
 
-  // ── Cap brim (wide, dark fold underneath) ──
-  sp(-4,-18, 8,1, GN.cap);
-  sp(-4,-17, 8,1, GN.capD);
-  sp(-4,-18, 2,1, GN.capL);            // lit brim corner
+  // ── Shoulder yokes bridge the chest out over the arms ──
+  sp(-12,-26,7,2,GN.tunic); sp(-12,-26,2,2,L.tL);
+  sp(  5,-26,7,2,GN.tunic); sp(  9,-26,3,2,L.tD);
 
-  // ── Tall cone, tip droops toward facing (shift grows upward) ──
-  const cone=[[-19,7,0],[-20,6,0],[-21,5,1],[-22,5,1],[-23,4,2],[-24,3,2],[-25,2,3],[-26,1,3]];
-  cone.forEach(([dy,w,shift])=>{
-    const dx=-(w>>1)+shift;
-    sp(dx,     dy, w,1, GN.cap);
-    sp(dx,     dy, 1,1, GN.capL);      // lit left edge
-    sp(dx+w-1, dy, 1,1, GN.capD);      // shadow right edge
+  // ── Arms swing like pendulums (stretching with the swing), cuffs,
+  // bare weathered hands ──
+  sp(-12,-24,4,8+aw,GN.tunic); sp(-12,-24,1,8+aw,L.tL);
+  sp(  8,-24,4,8-aw,GN.tunic); sp( 10,-24,2,8-aw,L.tD);
+  sp(-12,-17+aw,4,1,GN.tunicD);        // cuffs
+  sp(  8,-17-aw,4,1,GN.tunicD);
+
+  // ── Wicker basket hooked over his left forearm, swinging with it
+  // (drawn before the hand so the hand grips its rim in front) ──
+  sp(-16,-22+aw,8,2,GN.basD);          // handle, across the forearm
+  sp(-18,-20+aw,2,4,GN.basD);          // handle sides
+  sp(-8,-20+aw,2,4,GN.basD);
+  sp(-18,-16+aw,12,2,GN.basL);         // rim
+  sp(-18,-14+aw,12,2,GN.bas);          // woven body…
+  for(let i=-17;i<-6;i+=3) sp(i,-14+aw,1,1,GN.basW);
+  for(let i=-18;i<-6;i+=3) sp(i,-13+aw,1,1,GN.basW);
+  sp(-16,-12+aw,8,1,GN.basW);          // …tapering to the base
+  sp(-16,-11+aw,8,1,GN.basD);
+  // Picked mushrooms pile up visibly in the basket
+  const fill=MUSHROOMS.length?collected/MUSHROOMS.length:0;
+  if(fill>0)   { sp(-16,-18+aw,3,2,P.mushrC);  sp(-16,-18+aw,1,1,'#d04038'); }
+  if(fill>=0.4){ sp(-12,-18+aw,3,2,'#d8a030'); sp(-12,-18+aw,1,1,'#f0c860'); }
+  if(fill>=0.7){ sp(-14,-20+aw,3,2,P.mushrC);  sp(-14,-20+aw,1,1,'#d04038'); }
+
+  sp(-12,-16+aw,4,4,GN.skin); sp( -9,-16+aw,1,4,L.sD); // left hand
+  sp(  8,-16-aw,4,4,GN.skin); sp( 11,-16-aw,1,4,L.sD); // right hand
+
+  // ── Long-toed red leather shoes: the toe tapers forward into a
+  // sharp upturned point well past the belly (drawn over the hem so
+  // a kicked-up foot shows in front of the sweater) ──
+  sp(-10,-4+lf,4,4,GN.boot); sp(-10,-4+lf,4,1,GN.bootD); // left heel
+  sp( -6,-3+lf,3,3,GN.boot); sp( -6,-3+lf,3,1,GN.bootL); // toe tapers forward…
+  sp( -3,-2+lf,2,2,GN.boot);
+  sp( -1,-3+lf,2,3,GN.boot); sp( -1,-3+lf,2,1,GN.bootL); // …then sweeps up
+  sp(  0,-4+lf,2,2,GN.boot); sp(  0,-4+lf,2,1,GN.bootL); // into a curled tip
+  sp(-10,-1+lf,8,1,GN.bootD);                            // sole
+  sp(  4,-4+rf,4,4,GN.boot); sp(  4,-4+rf,4,1,GN.bootD); // right heel
+  sp(  8,-3+rf,3,3,GN.boot); sp(  8,-3+rf,3,1,GN.bootL); // toe tapers forward…
+  sp( 11,-2+rf,2,2,GN.boot);
+  sp( 13,-3+rf,2,3,GN.boot); sp( 13,-3+rf,2,1,GN.bootL); // …then sweeps up
+  sp( 14,-4+rf,2,2,GN.boot); sp( 14,-4+rf,2,1,GN.bootL); // into a curled tip
+  sp(  4,-1+rf,8,1,GN.bootD);                            // sole
+
+  // ── Beaming face ──
+  hp(-6,-38,12,10,GN.skin);            // face block (-38…-29)
+  hp( 4,-38,2,10,L.sD);                // shaded cheek edge
+  hp(-5,-37,3,1,GN.beard);             // bushy grey brows
+  hp( 2,-37,3,1,GN.beard);
+  hp(-5+eo,-34,1,1,GN.eye);            // happy squinted eyes —
+  hp(-4+eo,-35,1,1,GN.eye);            // two little smiling arches
+  hp(-3+eo,-34,1,1,GN.eye);
+  hp( 2+eo,-34,1,1,GN.eye);
+  hp( 3+eo,-35,1,1,GN.eye);
+  hp( 4+eo,-34,1,1,GN.eye);
+  hp(-6,-33,2,2,GN.cheek);             // rosy cheeks
+  hp( 4,-33,2,2,GN.cheek);
+  hp(-2,-34,4,4,GN.nose);              // big round nose
+  hp(f>0?-2:0,-34,2,2,GN.noseL);       // shine stays on the sunlit side
+  hp(-5,-31,1,1,GN.mouth);             // grin curls up at the corners…
+  hp( 4,-31,1,1,GN.mouth);
+  hp(-4,-30,8,1,GN.mouth);             // …into a wide open laugh
+  hp(-3,-29,6,1,GN.mouth);
+  hp(-8,-36,2,4,GN.beard);             // grey hair at the temples
+  hp( 6,-36,2,4,GN.beard);
+
+  // ── Short trimmed grey beard rounding the chin ──
+  const beard=[[-28,16],[-27,16],[-26,14],[-25,12],[-24,8],[-23,4]];
+  beard.forEach(([dy,w])=>{
+    const dx=-(w>>1);
+    hp(dx,dy,w,1,GN.beard);
+    hp(dx,dy,2,1,L.bL);                // lit left edge
+    hp(dx+w-2,dy,2,1,L.bD);            // shadow right edge
   });
+  hp(-8,-30,2,2,GN.beard);             // side whiskers
+  hp( 6,-30,2,2,GN.beard);
 
-  // ── White cap-pom at the tip (sways when idle) ──
-  const sw=moving?0:Math.round(Math.sin(t*3));
-  sp(2+sw,-27, 2,2, GN.beardL);
-  sp(3+sw,-27, 1,1, GN.pomS);
+  // ── Wide-brimmed felt hat ──
+  hp(-14,-40+hatDy,28,2,GN.hat);       // wide brim
+  hp(-14,-40+hatDy,6,2,L.hL);          // lit left of brim
+  hp(  8,-40+hatDy,6,2,L.hD);          // shaded right of brim
+  hp(-14,-38+hatDy,2,1,GN.hatD);       // brim edges droop
+  hp( 12,-38+hatDy,2,1,GN.hatD);
+  hp(-8,-42+hatDy,16,2,GN.band);       // hat band
+  const crown=[[-43,16],[-44,16],[-45,15],[-46,13],[-47,11]];
+  crown.forEach(([dy,w])=>{
+    const dx=-(w>>1);
+    hp(dx,dy+hatDy,w,1,GN.hat);
+    hp(dx,dy+hatDy,2,1,L.hL);          // lit left edge
+    hp(dx+w-2,dy+hatDy,2,1,L.hD);      // shadow right edge
+  });
+  hp(-1,-47+hatDy,2,3,GN.hatD);        // crease dented into the crown
+  hp( 7,-46+hatDy,1,3,'#c22b20');      // a little red feather in the band
+  hp( 7,-46+hatDy,1,1,'#e85548');
 }
 
 // ── Vegetation ────────────────────────────────────────────────
@@ -2323,19 +2405,6 @@ function renderMinimap(){
     mmCtx.fillStyle=m.collected?'rgba(120,120,120,.5)':'#cc3838';
     mmCtx.beginPath();mmCtx.arc(m.fx*mw,m.fy*mh,2.5,0,Math.PI*2);mmCtx.fill();
   });
-  // Fog of war: cover whose alpha is the cell's unexplored amount, quantized
-  // to a few steps and scaled up unsmoothed — a chunky pixel-art fade
-  if(fogDirty){
-    const img=fogCtx.createImageData(FOG_N,FOG_N), d=img.data;
-    for(let i=0;i<fog.length;i++){
-      const a=Math.round((255-fog[i])/255*3)*85; // 4 alpha steps
-      d[i*4]=11; d[i*4+1]=14; d[i*4+2]=7; d[i*4+3]=a;
-    }
-    fogCtx.putImageData(img,0,0);
-    fogDirty=false;
-  }
-  mmCtx.imageSmoothingEnabled=false;
-  mmCtx.drawImage(fogCv,0,0,mw,mh);
   mmCtx.strokeStyle='rgba(255,255,255,.88)';mmCtx.lineWidth=1.5;
   mmCtx.strokeRect(cam.x/WW*mw,cam.y/WH*mh,VW/WW*mw,VH/WH*mh);
   mmCtx.fillStyle='#ffe050';mmCtx.strokeStyle='#5a3800';mmCtx.lineWidth=1;
@@ -2380,7 +2449,17 @@ function update(dt){
   fullness=Math.max(0,fullness-dt/FULL_DRAIN_T*((dx||dy)?WALK_DRAIN:1));
   const hungryMul=fullness<HUNGRY_AT?HUNGRY_SPEED:1;
   const spd=SPEED*hungryMul*(wd>0?0.62-0.22*wd:onMountainAt(char.x,char.y)?0.45:pc===3?1.5:pc===2?1.3:pc===1?1.12:1);
-  let mx=dx*spd*dt, my=dy*spd*dt;
+  // Dilly-dally amble: he strolls rather than beelines — a gentle
+  // side-to-side weave plus a slight lilt in pace, layered on top of the
+  // steered direction. The weave never bends his heading more than ~14°,
+  // so control stays predictable; collision below still applies as usual.
+  let ax=dx, ay=dy;
+  if(dx||dy){
+    const weave=Math.sin(gameTime*2.4)*0.16+Math.sin(gameTime*1.1)*0.09;
+    const lilt=1+0.07*Math.sin(gameTime*3.3);
+    ax=(dx-dy*weave)*lilt; ay=(dy+dx*weave)*lilt;
+  }
+  let mx=ax*spd*dt, my=ay*spd*dt;
   let nx=clamp(char.x+mx,CHAR_R,WW-CHAR_R), ny=clamp(char.y+my,CHAR_R,WH-CHAR_R);
   const inTree=treeAt(char.x,char.y);
   if(inTree){
@@ -2407,7 +2486,6 @@ function update(dt){
          if(!blocked(char.x,ny)&&!treeAt(char.x,ny)) char.y=ny; }
   char.vx=dx*spd; char.vy=dy*spd;
   easeCamera(dt);
-  revealFog();
   PICK_SPARKS.forEach(s=>{s.age+=dt;s.wx+=s.vx*dt;s.wy+=s.vy*dt;s.vy+=55*dt;});
   PICK_SPARKS=PICK_SPARKS.filter(s=>s.age<s.life);
   MUSHROOMS.forEach(m=>{
@@ -2500,7 +2578,6 @@ function startGame(){
   document.getElementById('win').classList.remove('show');
   const start=findStart(); char.x=start.x; char.y=start.y; char.vx=0; char.vy=0; char.facing=1;
   snapCam();
-  fog.fill(0); fogDirty=true; revealFog();
 }
 
 document.getElementById('btn-play').addEventListener('click',startGame);
