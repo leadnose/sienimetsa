@@ -83,6 +83,13 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   font:400 clamp(9px,2.1vw,13px)/1 'PS2P',monospace;
   color:#5d3200;box-shadow:0 3px 14px rgba(0,0,0,.18);
 }
+#homearrow{
+  position:fixed;z-index:45;display:none;
+  width:34px;height:34px;line-height:34px;text-align:center;
+  font-size:26px;color:#ffe066;text-shadow:0 0 4px #000,0 0 8px #000;
+  pointer-events:none;
+}
+#homearrow.show{display:block;}
 </style>
 </head>
 <body>
@@ -95,9 +102,10 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 <div id="mapdisp"><canvas class="hico" id="ico-map"></canvas> Map <span id="mapnum">1</span></div>
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
+<div id="homearrow">➤</div>
 <div id="win" role="dialog" aria-modal="true" aria-labelledby="wm-label">
   <div class="wb">🎉🍄‍🟫🎉</div>
-  <div class="wm" id="wm-label">Löysit kaikki sienet!</div>
+  <div class="wm" id="wm-label">Löysit kaikki sienet ja veit ne kotiin!</div>
   <div class="wb" style="font-size:clamp(40px,10vw,78px)">⭐⭐⭐</div>
   <div id="win-menu" class="win-menu"></div>
   <div class="win-hint">↑ ↓ valitse · Enter pelaa</div>
@@ -164,7 +172,8 @@ const NUM_VARIANTS=8; // shape variants per tree species+size
 
 // ── World data ────────────────────────────────────────────────
 let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], TERRAIN_ZONES=[];
-let TREES=[], SHRUBS=[], FLOWERS=[], PATCHES=[], MUSHROOMS=[], COLLIDERS=[], UNDERSTORY=[];
+let TREES=[], SHRUBS=[], FLOWERS=[], PATCHES=[], MUSHROOMS=[], COLLIDERS=[], UNDERSTORY=[], HUT_COLLIDERS=[];
+let VILLAGE=null; // Gubbe's home clearing: {x,y (world px), r (clearing radius), huts:[{dx,dy,scale}]}
 let TREE_GRID=null, TREE_CELL=1; // spatial grid of trunk colliders
 let PATHS=[], PATH_MASK=null;    // trail polylines + rasterised influence grid
 const PM_N=200;                  // path-influence grid resolution
@@ -535,8 +544,58 @@ function pathCodeAt(wx,wy){
   return PATH_MASK[gy*PM_N+gx];
 }
 
+// Gubbe's home: a clearing of gnome cottages on a main trail, clear of
+// water/mountains. Trees, mushrooms and the trunk-collision grid all carve
+// a hole around it later in buildWorld() so it reads as an actual clearing.
+function placeVillage(r){
+  const clearOf=(x,y)=> x>0.08&&x<0.92&&y>0.10&&y<0.90
+    && !WATER_DEF.some(w=>Math.hypot(x-w.x,y-w.y)<Math.max(w.rx,w.ry)*2.4)
+    && !MOUNT_DEF.some(m=>Math.hypot(x-m.x,y-m.y)<m.s*.24);
+  const mains=PATHS.filter(p=>p.tier===0);
+  const pool=mains.length?mains:PATHS;
+  let vx=.5, vy=.5;
+  for(let i=0;i<500 && pool.length;i++){
+    const p=pool[(r()*pool.length)|0], pt=p.pts[(r()*p.pts.length)|0];
+    if(clearOf(pt.x,pt.y)){ vx=pt.x; vy=pt.y; break; }
+  }
+  const cx=vx*WW, cy=vy*WH;
+  const nH=2+((r()*6)|0); // 2-7 cottages
+  // Ring grows with the headcount so a 7-hut hamlet doesn't crowd/overlap
+  // the way a 2-hut one would at the same radius.
+  const ringR=treeSz*(2.3+nH*0.16);
+  // Shuffle the 4 building styles (toadstool/porcini/log-cabin/turf-house)
+  // so the first few huts are guaranteed distinct instead of leaning on
+  // chance — a village of several nearly-identical cottages would read as
+  // a rendering bug rather than a hamlet.
+  const types=[0,1,2,3];
+  for(let i=types.length-1;i>0;i--){ const j=(r()*(i+1))|0; [types[i],types[j]]=[types[j],types[i]]; }
+  const huts=[];
+  for(let i=0;i<nH;i++){
+    const a=(i/nH)*Math.PI*2+r()*.6-.3;
+    const d=ringR*(0.82+r()*.32);
+    const type=types[i%4];
+    // smoke: 0 means the hearth's unlit and the hut has no chimney stack at
+    // all (not just an extinguished fire) — a village where every cottage
+    // has an identical little smoke curl looks too uniform. The rest get
+    // 1-3, a rough puff count so some chimneys smoke lazily and others pour.
+    // Turf-roofed cottages (type 3) never show a physical chimney stack —
+    // smoke seeming to rise from a bare green roof reads as a bug — so
+    // they're always unlit regardless of the roll.
+    let smoke=r()<0.22?0:1+((r()*3)|0);
+    if(type===3) smoke=0;
+    huts.push({dx:Math.cos(a)*d, dy:Math.sin(a)*d, scale:0.85+r()*.4, type, smoke});
+  }
+  // Guarantee at least one heavily-smoking chimney (max puff level) among
+  // the huts that can actually have one, so the village doesn't read as
+  // uniformly quiet even when the random rolls above landed low.
+  const smokable=huts.filter(h=>h.type!==3);
+  if(smokable.length && !smokable.some(h=>h.smoke===3)) smokable[(r()*smokable.length)|0].smoke=3;
+  return {x:cx, y:cy, r:ringR, huts};
+}
+
 function buildWorld() {
   generateWorld(mapNum);
+  VILLAGE = placeVillage(mkRng(mapNum * 8123 + 31));
   const r  = mkRng(mapNum * 1009 + 42);
   const rp = mkRng(mapNum * 1013 + 77);
   const rpath = mkRng(mapNum * 5101 + 61); // path-corridor thinning (keeps tree RNG stable)
@@ -585,6 +644,7 @@ function buildWorld() {
   TREES=TREES.filter(tr=>{
     if(WATER_DEF.some(w=>Math.hypot(tr.x-w.x,tr.y-w.y)<Math.max(w.rx,w.ry)*0.92)) return false;
     if(MOUNT_DEF.some(m=>Math.hypot(tr.x-m.x,tr.y-m.y)<m.s*.09)) return false;
+    if(Math.hypot(tr.x*WW-VILLAGE.x,tr.y*WH-VILLAGE.y)<VILLAGE.r*1.7) return false;
     const pc=pathCodeAt(tr.x*WW,tr.y*WH);
     if(pc>=2) return false;                 // main/side trail: clear a walkable lane
     if(pc===1 && rpath()<.70) return false; // faint trail: thinned, threads between trunks
@@ -642,6 +702,7 @@ function buildWorld() {
     // spot, spot inside the sprite's footprint) — keeps every mushroom
     // at least half-visible.
     const mx=fx*WW,my=fy*WH;
+    if(Math.hypot(mx-VILLAGE.x,my-VILLAGE.y)<VILLAGE.r*1.4) return false; // not inside the village
     for(const t of TREES){
       const sz=treeSz*t.m, dy=t.y*WH-my;
       if(dy>0 && dy<sz*4.2 && Math.abs(t.x*WW-mx)<sz*1.2) return false;
@@ -669,8 +730,15 @@ function buildWorld() {
   // The gnome can wade into a pond up to WATER_MAX_DEPTH before being
   // stopped — so the collider is a *shrunken* ellipse around the deep
   // centre, not the pond's full shore-to-shore extent.
+  // h back-reference lets hutAt() key its bump-sound cooldown off the hut
+  // object itself, the same way tree trunks store bumpSndT on themselves.
+  HUT_COLLIDERS = VILLAGE.huts.map(h => ({
+    fx:(VILLAGE.x+h.dx)/WW, fy:(VILLAGE.y+h.dy)/WH,
+    frx:(treeSz*0.85*h.scale)/WW, fry:(treeSz*0.85*h.scale)/WH, wob:[], h,
+  }));
   COLLIDERS = [
     ...WATER_DEF.map(w => ({fx:w.x, fy:w.y, frx:w.rx*(1-WATER_MAX_DEPTH), fry:w.ry*(1-WATER_MAX_DEPTH), wob:w.wob})),
+    ...HUT_COLLIDERS,
   ];
   buildTreeGrid();
   document.getElementById('tot').textContent = MUSHROOMS.length;
@@ -680,6 +748,12 @@ function buildWorld() {
 const char = {x:0,y:0,vx:0,vy:0,facing:1};
 const cam  = {x:0,y:0};
 let collected=0, gameWon=false, gameTime=0;
+// Once every mushroom is collected he must walk the full basket back to
+// home before the map counts as finished — readyToReturn flips the HUD
+// into "go home" mode; returningTriggered latches the win the instant he
+// steps into the village so update()'s per-frame distance check can't fire
+// showWin() more than once while the 300ms fanfare delay is pending.
+let readyToReturn=false, returningTriggered=false;
 let PICK_SPARKS=[];
 const SPARK_PAL=[[200,22,22],[218,170,20],[255,240,170],[255,255,255]];
 const SPEED=260, CHAR_R=14, PICK_R=38, PICK_ANIM_DUR=0.40;
@@ -708,23 +782,8 @@ const BEND_DUR=0.6, BEND_COOLDOWN=0.6, BEND_HIT_PAD=90;
 // on this changing, so a new contact always thonks no matter what any
 // timestamp says.
 let bumpTree=null;
+let bumpHut=null; // hut collider Gubbe is currently pressed against, mirrors bumpTree
 
-function findStart() {
-  const r = mkRng(mapNum * 7331 + 17);
-  // Prefer to begin on a main/side trail (a forest entrance)
-  const trails = PATHS.filter(p=>p.tier<=1);
-  for(let i=0; i<300 && trails.length; i++){
-    const p=trails[(r()*trails.length)|0], pt=p.pts[(r()*p.pts.length)|0];
-    const x=pt.x*WW, y=pt.y*WH;
-    if(!blocked(x,y)&&!treeAt(x,y)) return {x,y};
-  }
-  for(let i=0; i<500; i++){
-    const x = CHAR_R*2 + r()*(WW-CHAR_R*4);
-    const y = CHAR_R*2 + r()*(WH-CHAR_R*4);
-    if(!blocked(x,y)&&!treeAt(x,y)) return {x,y};
-  }
-  return {x:WW*.5, y:WH*.5};
-}
 function snapCam() {
   cam.x = Math.max(0,Math.min(WW-VW, char.x-VW/2));
   cam.y = Math.max(0,Math.min(WH-VH, char.y-VH/2));
@@ -795,6 +854,17 @@ function blocked(nx,ny) {
     if(ex*ex+ey*ey<1) return true;
   }
   return false;
+}
+// Like blocked(), but scoped to the village's huts and returning which one —
+// so update() can tell "walked into a cottage wall" apart from "waded
+// into a pond" and only the former gets a bump thonk.
+function hutAt(x,y){
+  for(const c of HUT_COLLIDERS){
+    const cx=c.fx*WW, cy=c.fy*WH, crx=c.frx*WW, cry=c.fry*WH;
+    const ex=(x-cx)/(crx+CHAR_R), ey=(y-cy)/(cry+CHAR_R);
+    if(ex*ex+ey*ey<1) return c;
+  }
+  return null;
 }
 // Trees are handled separately from blocked(): update() slides the gnome
 // around a trunk that's in the way instead of stopping him. Returns the
@@ -2130,6 +2200,216 @@ function drawShrub(sh){
   }
 }
 
+// ── Home village cottages ──────────────────────────────────────
+// Four building styles keep the village from reading as one hut copy-
+// pasted four times: a fly-agaric toadstool cottage, a porcini cottage
+// (echoing the actual collectible mushroom), a peaked wood-shingle log
+// cabin, and a turf-roofed earth house (h.type 0-3, assigned in
+// placeVillage). Each is built once into an ImageData buffer with real
+// per-pixel Bayer dithering — matching the tree/hill sprite technique
+// above — and cached in SP[], so the wood grain, shingle rows, mottled
+// caps and turf speckle cost nothing per frame; only the chimney smoke
+// is redrawn live.
+function ibNoise(x,y,seed){
+  let h=(x*374761393+y*668265263+seed*2246822519)>>>0;
+  h=(h^(h>>>13))*1274126177>>>0;
+  h=(h^(h>>>16))>>>0;
+  return (h&0xff)/255-0.5;
+}
+// Fill a w×h block with a palette ramp, per-pixel Bayer-dithered between
+// adjacent stops (à la ibSphere/hill rows) plus a little hashed noise so
+// flat colour fields read as wood/stone/turf grain instead of a poster.
+function ibTexRect(buf,W,H,x0,y0,w,h,pal,shadeAt,noiseAmt,seed){
+  const n=pal.length;
+  for(let yy=0;yy<h;yy++){
+    const py=y0+yy; if(py<0||py>=H) continue;
+    for(let xx=0;xx<w;xx++){
+      const px=x0+xx; if(px<0||px>=W) continue;
+      let shade=shadeAt(xx,yy)+ibNoise(px,py,seed)*noiseAmt;
+      shade=Math.max(0,Math.min(0.999,shade));
+      const bt=b4(px,py);
+      const fi=shade*(n-1), i0=Math.min(n-2,fi|0);
+      const pick=(fi-i0)*16>bt?i0+1:i0;
+      ibSet(buf,W,H,px,py,...pal[pick]);
+    }
+  }
+}
+// Faint 1px rim on every transparent pixel touching the silhouette — cheap
+// to do once at sprite-build time, and it keeps a cottage readable against
+// whatever's directly behind it (grass, path, another building) the same
+// way drawMushroom's outline pass does for the mushrooms themselves.
+// alpha is low (semi-transparent) so it reads as a soft edge, not a cartoon
+// outline. Snapshots alpha first so the rim stays a single pixel thick.
+function ibOutline(buf,W,H,rgb,alpha){
+  const srcA=new Uint8ClampedArray(buf.length/4);
+  for(let i=0,p=3;i<srcA.length;i++,p+=4) srcA[i]=buf[p];
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      const i=y*W+x;
+      if(srcA[i]) continue; // only paint onto still-transparent pixels
+      const touches=(x>0&&srcA[i-1])||(x<W-1&&srcA[i+1])||(y>0&&srcA[i-W])||(y<H-1&&srcA[i+W]);
+      if(touches){ const p=4*i; buf[p]=rgb[0];buf[p+1]=rgb[1];buf[p+2]=rgb[2];buf[p+3]=alpha; }
+    }
+  }
+}
+const PAL_WALL    = mkPalRGB(['#3e2810','#5e3f20','#79552c','#9a7040','#b48a52','#c89a5c']);
+const PAL_DOOR    = mkPalRGB(['#170c04','#2a1608','#3c2010','#4a2c10']);
+const PAL_AMANITA = mkPalRGB(['#5a1008','#7a1710','#9c2418','#c22a20','#e6483c','#f06a54']);
+const PAL_PORCINI = mkPalRGB(['#3a2408','#502f0a','#66400f','#7a4c15','#945c1c','#a5682a','#b47838']);
+const PAL_PORE    = mkPalRGB(['#6e5628','#8a6c34','#c8b878','#e0d4a0']);
+const PAL_SHINGLE = mkPalRGB(['#241a10','#443628','#5a4a36','#6a5640','#8a7458','#a08862']);
+const PAL_STONE   = mkPalRGB(['#3a3834','#5c5850','#787060','#8a8478','#a29c8c']);
+const PAL_TURF    = mkPalRGB(['#182808','#263c0e','#3a5818','#4e7422','#5e8830','#72a03e']);
+
+function makeHutSpr(type,s,seed,hasChim){
+  const wallW=s*6, wallH=Math.max(4,(s*4.4)|0);
+  const wallHUsed=type===3?Math.round(wallH*0.68):wallH; // turf house sits low, half-buried
+  const rowH=Math.max(1,(s*.62)|0);
+  const domeHalfW=s*3.9|0;
+  const roofH=type===2?(s*3.2|0):type===3?(s*2.6|0):rowH*9;
+  const halfW=Math.max(wallW/2,domeHalfW)+3;
+  const W=Math.ceil(halfW*2), H=Math.ceil(wallH+roofH+s*2+6);
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const c=cv.getContext('2d');
+  const id=c.createImageData(W,H);
+  const buf=id.data;
+  const ox=W>>1, oy=H-3;
+  const wx0=Math.round(ox-wallW/2), wallTop=oy-wallHUsed;
+
+  // ── walls: stacked round logs ──
+  // Each course reads as its own little half-cylinder — bright highlight
+  // along its top edge, rounding down through midtone, then a dark groove
+  // right where it meets the log below — instead of one flat gradient
+  // for the whole wall. The building-scale left-lit/right-shadow tilt is
+  // layered on top so the logs still read as one lit form, not stripes.
+  const logH=Math.max(2,(s*.55)|0);
+  ibTexRect(buf,W,H,wx0,wallTop,Math.round(wallW),wallHUsed,PAL_WALL,(xx,yy)=>{
+    const lit=1-xx/wallW;
+    const logT=(yy%logH)/logH;
+    const cyl=logT<0.18?1:logT>0.82?0.08:1-((logT-0.18)/0.64)*0.85;
+    return 0.10+0.28*lit+0.48*cyl;
+  },0.06,seed+1);
+  // round door
+  const dW=Math.max(2,(s*1.6)|0), dH=Math.min(wallHUsed,Math.max(2,(s*2.4)|0));
+  ibTexRect(buf,W,H,Math.round(ox-dW/2),oy-dH,dW,dH,PAL_DOOR,(xx)=>0.15+0.5*(xx/dW),0.06,seed+2);
+  ibSet(buf,W,H,Math.round(ox+dW/2-2),Math.round(oy-dH*0.45),200,146,56); // knob
+  // glowing window with a dithered warm edge
+  const winX=Math.round(ox+wallW*0.22), winY=Math.round(wallTop+wallHUsed*0.30), wS=Math.max(2,(s*1.1)|0);
+  ibRect(buf,W,H,winX-1,winY-1,wS+2,wS+2,[42,22,8]);
+  for(let yy=0;yy<wS;yy++) for(let xx=0;xx<wS;xx++)
+    ibSet(buf,W,H,winX+xx,winY+yy, ...(b4(winX+xx,winY+yy)>3?[255,206,107]:[255,226,150]));
+
+  let chimTop=null;
+  if(type===0||type===1){
+    // Type 0/1: oversized toadstool/porcini cap — same layered-row dome
+    // trick as drawMushroom, now with per-row dithered curvature shading.
+    const pal=type===0?PAL_AMANITA:PAL_PORCINI;
+    for(let i=0;i<9;i++){
+      const t=i/8, rw=(domeHalfW*(1-t*t*0.82))|0, yy=wallTop-rowH*i;
+      if(rw<1) continue;
+      ibTexRect(buf,W,H,ox-rw,yy,rw*2,rowH,pal,(xx)=>{
+        const u=(xx/(rw*2))*2-1;
+        return 0.30+0.55*(1-Math.abs(u)*0.55)-0.18*t;
+      },0.05,seed+10+i);
+    }
+    ibRect(buf,W,H,ox-domeHalfW,wallTop-1,domeHalfW*2,2,pal[0]);
+    if(type===0){ // fly-agaric spots, dithered edges
+      const sprR=mkRng((seed+900)>>>0);
+      for(let i=0;i<6;i++){
+        const ang=sprR()*Math.PI, rad=s*(1.1+sprR()*1.9);
+        const sx=(ox+Math.cos(ang)*rad)|0, sy=(wallTop-rowH*(1.5+sprR()*5))|0;
+        const sw=Math.max(1,(s*.5)|0), sh=Math.max(1,(s*.4)|0);
+        for(let yy=0;yy<sh;yy++) for(let xx=0;xx<sw;xx++)
+          if(b4(sx+xx,sy+yy)>2) ibSet(buf,W,H,sx+xx,sy+yy,253,246,224);
+      }
+    } else { // porcini pale pore band peeking out under the eave
+      const poreH=Math.max(1,(rowH*.5)|0);
+      ibTexRect(buf,W,H,ox-domeHalfW,wallTop-poreH,domeHalfW*2,poreH,PAL_PORE,
+        (xx)=>0.35+0.4*Math.abs(xx/(domeHalfW*2)-.5),0.05,seed+55);
+    }
+    if(hasChim){
+      const chX=(ox+wallW*0.3)|0, chY=wallTop-rowH*6;
+      ibTexRect(buf,W,H,chX,chY,Math.max(2,s),(s*1.6)|0,PAL_STONE,(xx)=>0.35+0.35*(1-xx/Math.max(2,s)),0.06,seed+60);
+      chimTop={x:chX+s*0.5,y:chY};
+    }
+  } else if(type===2){
+    // Type 2: pitched wood-shingle roof, alternating shingle-row shading,
+    // plus a speckled stone chimney.
+    for(let ry=0; ry<roofH; ry++){
+      const t=ry/roofH, rw=Math.round(wallW*0.62*(1-t))+2, band=(ry/Math.max(2,(s*.4)))|0;
+      ibTexRect(buf,W,H,ox-rw,wallTop-ry,rw*2,1,PAL_SHINGLE,(xx)=>{
+        const lit=1-xx/(rw*2);
+        return 0.25+0.5*lit+((band%2)?0.08:-0.05);
+      },0.06,seed+20+ry);
+    }
+    ibRect(buf,W,H,ox-2,wallTop-roofH,4,2,[36,28,20]); // ridge cap
+    if(hasChim){
+      // Anchored low on the slope (30% up from the eave) where the roof is
+      // still wide enough to fully cover the chimney's footprint — higher
+      // up near the ridge it narrows faster than the stack is wide, which
+      // left a gap of bare background between the chimney base and the
+      // shingles. chH is tall enough to still poke up past the ridge line.
+      const chX=(ox+wallW*0.18)|0, chY=(wallTop-roofH*0.3)|0, chW=s+2, chH=Math.max(2,(s*2.6)|0);
+      ibTexRect(buf,W,H,chX,chY-chH,chW,chH,PAL_STONE,(xx,yy)=>{
+        const block=(((xx/3|0)+(yy/3|0))%2)*0.12;
+        return 0.35+0.3*(1-xx/chW)+block;
+      },0.05,seed+30);
+      chimTop={x:chX+chW*0.5,y:chY-chH};
+    }
+  } else {
+    // Type 3: turf-roofed earth mound — radial dome shading + noise reads
+    // as grassy texture, with a few tufted sprigs; there's no physical
+    // chimney stack, just a smoke-hole point (hasChim gates whether it's lit).
+    const domeR=wallW*0.62|0;
+    for(let ry=0; ry<roofH; ry++){
+      const t=ry/roofH, rw=Math.round(domeR*Math.sqrt(Math.max(0,1-t*t)))+1;
+      ibTexRect(buf,W,H,ox-rw,wallTop-ry,rw*2,1,PAL_TURF,(xx)=>{
+        const u=(xx/(rw*2))*2-1;
+        return 0.30+0.45*(1-Math.abs(u))+0.15*(1-t);
+      },0.10,seed+40+ry);
+    }
+    const sprR=mkRng((seed+770)>>>0);
+    for(let i=0;i<5;i++){
+      const ang=Math.PI*0.15+sprR()*Math.PI*0.7, rad=domeR*(0.25+sprR()*.55);
+      const sx=(ox+Math.cos(ang)*rad)|0, sy=(wallTop-roofH*0.5-sprR()*roofH*0.4)|0;
+      ibSet(buf,W,H,sx,sy,78,116,34); ibSet(buf,W,H,sx,sy-1,94,138,46);
+    }
+    if(hasChim) chimTop={x:ox,y:wallTop-roofH};
+  }
+
+  ibOutline(buf,W,H,hex2rgb(P.outline),130);
+  c.putImageData(id,0,0);
+  return {cv,ox,oy,chimTop,s};
+}
+function getHutSpr(h,wx,wy){
+  const s=Math.max(3,(treeSz*h.scale*0.5/PS)|0);
+  const seed=((wx*131+wy*977)|0)>>>0;
+  const hasChim=h.smoke>0;
+  const key='hut'+h.type+'_'+s+'_'+seed+(hasChim?'c':'');
+  if(!SP[key]) SP[key]=makeHutSpr(h.type,s,seed,hasChim);
+  return SP[key];
+}
+function drawHut(wx,wy,h){
+  const x=wpx(wx), y=wpy(wy);
+  const spr=getHutSpr(h,wx,wy);
+  pr(x-spr.s*3|0,y+1,spr.s*6|0,2,'#203808'); // ground shadow
+  pixCtx.drawImage(spr.cv, x-spr.ox, y-spr.oy);
+  // Puff count/spacing scales with h.smoke (1-3, 0 means the sprite has no
+  // chimney at all and spr.chimTop is null) so some hearths just smoulder
+  // with one wispy curl while others pour a thick, closely-spaced plume.
+  if(spr.chimTop && h.smoke>0){
+    const cx=x-spr.ox+spr.chimTop.x, cyBase=y-spr.oy+spr.chimTop.y;
+    const phase=gameTime*0.65+h.dx*0.01;
+    const gap=2.4/h.smoke, sz=2+h.smoke;
+    for(let i=0;i<h.smoke;i++){
+      const puffT=(phase+i*gap)%2.4;
+      const py=(cyBase-6-puffT*10)|0, px=(cx+Math.sin(puffT*3+i)*4)|0;
+      const a=Math.max(0,1-puffT/2.4);
+      pr(px-sz/2|0,py-sz/2|0,sz,sz,`rgba(224,224,224,${(a*0.5).toFixed(2)})`);
+    }
+  }
+}
+
 // ── Mushroom ──────────────────────────────────────────────────
 function drawMushroom(m){
   const wx=m.fx*WW, wy=m.fy*WH;
@@ -2499,6 +2779,10 @@ function drawVegetation(charItem){
                             ()=>drawScotsPine(tx,ty,sz,tr.v,tr)});
     }
   });
+  if(VILLAGE) VILLAGE.huts.forEach(h=>{
+    const hx=VILLAGE.x+h.dx, hy=VILLAGE.y+h.dy;
+    if(hx>x0&&hx<x1&&hy>y0&&hy<y1) items.push({wy:hy,fn:()=>drawHut(hx,hy,h)});
+  });
   items.sort((a,b)=>a.wy-b.wy);
   items.forEach(it=>it.fn());
 }
@@ -2544,6 +2828,13 @@ function renderMinimap(){
     mmCtx.fillStyle=m.collected?'rgba(120,120,120,.5)':'#cc3838';
     mmCtx.beginPath();mmCtx.arc(m.fx*mw,m.fy*mh,2.5,0,Math.PI*2);mmCtx.fill();
   });
+  if(VILLAGE){
+    const vmx=VILLAGE.x/WW*mw, vmy=VILLAGE.y/WH*mh;
+    mmCtx.fillStyle='#e6483c'; mmCtx.strokeStyle='#3a1608'; mmCtx.lineWidth=1;
+    mmCtx.beginPath(); mmCtx.arc(vmx,vmy,4,0,Math.PI*2); mmCtx.fill(); mmCtx.stroke();
+    mmCtx.fillStyle='#fff3d8';
+    mmCtx.beginPath(); mmCtx.moveTo(vmx-4,vmy-3); mmCtx.lineTo(vmx,vmy-8); mmCtx.lineTo(vmx+4,vmy-3); mmCtx.closePath(); mmCtx.fill();
+  }
   mmCtx.strokeStyle='rgba(255,255,255,.88)';mmCtx.lineWidth=1.5;
   mmCtx.strokeRect(cam.x/WW*mw,cam.y/WH*mh,VW/WW*mw,VH/WH*mh);
   mmCtx.fillStyle='#ffe050';mmCtx.strokeStyle='#5a3800';mmCtx.lineWidth=1;
@@ -2570,6 +2861,23 @@ function render(){
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(pixCv,0,0,VW,VH);
   renderMinimap();
+  updateVillageOverlay();
+}
+
+// World is WORLD_SCALE viewports wide, so the village is usually off-screen —
+// once he's carrying a full basket a screen-edge arrow (rotated to face
+// the village from wherever he currently stands) points the way home.
+function updateVillageOverlay(){
+  if(!VILLAGE) return;
+  const arrow=document.getElementById('homearrow');
+  if(readyToReturn && !gameWon){
+    const ang=Math.atan2(VILLAGE.y-char.y, VILLAGE.x-char.x);
+    const R=Math.min(VW,VH)*0.42;
+    const ax=VW/2+Math.cos(ang)*R, ay=VH/2+Math.sin(ang)*R;
+    arrow.classList.add('show');
+    arrow.style.left=(ax-17)+'px'; arrow.style.top=(ay-17)+'px';
+    arrow.style.transform='rotate('+ang+'rad)';
+  } else arrow.classList.remove('show');
 }
 
 // ── Update ────────────────────────────────────────────────────
@@ -2642,9 +2950,24 @@ function update(dt){
     }
     bumpTree=touching;
   }
-  if(!blocked(nx,ny)){ char.x=nx; char.y=ny; }
-  else { if(!blocked(nx,char.y)&&!treeAt(nx,char.y)) char.x=nx;
-         if(!blocked(char.x,ny)&&!treeAt(char.x,ny)) char.y=ny; }
+  if(!blocked(nx,ny)){ char.x=nx; char.y=ny; bumpHut=null; }
+  else {
+    if(!blocked(nx,char.y)&&!treeAt(nx,char.y)) char.x=nx;
+    if(!blocked(char.x,ny)&&!treeAt(char.x,ny)) char.y=ny;
+    // Cottage walls don't slide him around like a trunk, so a bump reads
+    // as a dead stop — cue the same thonk trees use, edge-triggered the
+    // same way (cooldown normally, but an instant re-thonk if he's hit a
+    // *different* wall than last frame).
+    const hb=hutAt(nx,ny);
+    if(hb){
+      const since=gameTime-(hb.h.bumpSndT||0);
+      if(since>BEND_COOLDOWN||(bumpHut!==hb.h&&since>0.15)){
+        hb.h.bumpSndT=gameTime;
+        playBump();
+      }
+    }
+    bumpHut=hb?hb.h:null;
+  }
   char.vx=dx*spd; char.vy=dy*spd;
   easeCamera(dt);
   PICK_SPARKS.forEach(s=>{s.age+=dt;s.wx+=s.vx*dt;s.wy+=s.vy*dt;s.vy+=55*dt;});
@@ -2655,7 +2978,7 @@ function update(dt){
       m.collected=true; m.pickT=gameTime; collected++;
       document.getElementById('cnt').textContent=collected;
       playPick(); spawnCanvasSparks(m.fx*WW,m.fy*WH);
-      if(collected>=MUSHROOMS.length) setTimeout(showWin,400);
+      if(collected>=MUSHROOMS.length && !readyToReturn) onBasketFull();
     }
   });
   // Graze berry bushes in reach (cheap axis rejects before the distance
@@ -2675,6 +2998,11 @@ function update(dt){
   }
   for(const u of UNDERSTORY) if(u.eaten&&gameTime-u.eatT>REGROW_T) u.eaten=false;
   updateHungerHud();
+  if(readyToReturn && !returningTriggered && VILLAGE
+     && Math.hypot(char.x-VILLAGE.x,char.y-VILLAGE.y)<VILLAGE.r*0.9){
+    returningTriggered=true;
+    setTimeout(showWin,300);
+  }
 }
 let lastHungerPct=-1;
 function updateHungerHud(){
@@ -2739,9 +3067,18 @@ function playSelectedWinMap(){
   if(n===mapNum) startGame(); else goToMap(n);
 }
 
+// Called once the basket holds every mushroom on the map — cues the
+// screen-edge compass arrow instead of winning outright, since the map
+// only finishes once he's carried them back home.
+function onBasketFull(){
+  readyToReturn=true;
+  beep(880,.15); setTimeout(()=>beep(1175,.22),120);
+}
+
 function showWin(){
   gameWon=true;
   markMapCompleted(mapNum);
+  document.getElementById('homearrow').classList.remove('show');
   buildWinMenu();
   document.getElementById('win').classList.add('show');
   playWin();confetti();
@@ -2774,6 +3111,8 @@ function resize(){
 
 function startGame(){
   collected=0; gameWon=false; gameTime=0; PICK_SPARKS=[];
+  readyToReturn=false; returningTriggered=false;
+  document.getElementById('homearrow').classList.remove('show');
   fullness=1; lastHungerPct=-1; UNDERSTORY.forEach(u=>u.eaten=false);
   bilEaten=0; lingEaten=0;
   document.getElementById('bcnt').textContent='0';
@@ -2781,7 +3120,10 @@ function startGame(){
   MUSHROOMS.forEach(m=>{m.collected=false;m.pickT=0;});
   document.getElementById('cnt').textContent='0';
   document.getElementById('win').classList.remove('show');
-  const start=findStart(); char.x=start.x; char.y=start.y; char.vx=0; char.vy=0; char.facing=1;
+  const start=VILLAGE?{x:VILLAGE.x,y:VILLAGE.y}:{x:WW*.5,y:WH*.5};
+  char.x=Math.max(CHAR_R,Math.min(WW-CHAR_R,start.x));
+  char.y=Math.max(CHAR_R,Math.min(WH-CHAR_R,start.y));
+  char.vx=0; char.vy=0; char.facing=1;
   snapCam();
 }
 
