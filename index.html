@@ -90,10 +90,16 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   pointer-events:none;
 }
 #homearrow.show{display:block;}
+#buildinfo{
+  position:fixed;bottom:2px;left:4px;z-index:5;
+  font:9px monospace;color:rgba(255,255,255,.35);
+  pointer-events:none;user-select:none;
+}
 </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
+<div id="buildinfo">dev build</div>
 <div id="hud"><canvas class="hico" id="ico-basket"></canvas> <span id="cnt">0</span> / <span id="tot">?</span>
   <span id="hsep">·</span> <canvas class="hico" id="ico-bil"></canvas> <span id="bcnt">0</span>
   <span id="hsep2">·</span> <canvas class="hico" id="ico-ling"></canvas> <span id="lcnt">0</span>
