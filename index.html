@@ -1875,7 +1875,7 @@ function getTreeSpr(type,r,variant=0){
 function getShrubSpr(r){
   const rr=Math.max(3,Math.round(r/3)*3);
   const key='s'+rr;
-  if(!SP[key]) SP[key]=makeShrubSpr(rr);
+  if(!SP[key]) SP[key]=addCastShadow(makeShrubSpr(rr));
   return SP[key];
 }
 
@@ -2816,8 +2816,18 @@ function drawMushroom(m){
     pr(x,  y+4,1,1,'#70ee70');
   }
 
-  // Shadow
+  // Shadow — contact bar plus a cast shadow: the same silhouette shapes
+  // as the outline pass, projected through the base row and sheared
+  // up-and-right (light from the camera, like the trees and Gubbe).
   pr(x-s,y+1,s*2,1,'#2a3a10');
+  const castSh=(rx,ryTop,w,h)=>{
+    const ht=y-ryTop; if(ht<=0) return;
+    const hb=Math.max(0,ht-h);
+    pr(rx+Math.round(ht*.5), y-Math.round(ht*.2), w,
+       Math.max(1,Math.round((ht-hb)*.2)), '#2a3a10');
+  };
+  castSh(x-s/2|0,   y-s*2, s,     s*2);        // stem
+  castSh(x-s*2-1|0, y-s*2, s*4+2, (s*.38)|0);  // cap underside
 
   // Cap dome rows — penny bun (herkkutatti), chestnut brown
   const rowDef=[
@@ -2833,6 +2843,11 @@ function drawMushroom(m){
     {f:0.30, col:'#502f0a'},
   ];
   const rowH=Math.max(1,(s*.36)|0);
+
+  rowDef.forEach(({f},i)=>{ // cap rows cast too
+    const rw=(s*f)|0, yy=y-s*2-(s*.3*i)|0;
+    castSh(x-rw,yy,rw*2,rowH);
+  });
 
   // Outline pass — 1px dark rim around the whole silhouette so the
   // sprite stands out from the busy forest floor
