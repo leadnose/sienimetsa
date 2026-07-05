@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Sienimetsa 🍄</title>
+<title>Sienimetsa 🍄‍🟫</title>
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;}
 html,body{width:100%;height:100%;overflow:hidden;background:#1e2e0e;}
@@ -85,7 +85,7 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
 <div id="win" role="dialog" aria-modal="true" aria-labelledby="wm-label">
-  <div class="wb">🎉🍄🎉</div>
+  <div class="wb">🎉🍄‍🟫🎉</div>
   <div class="wm" id="wm-label">Löysit kaikki sienet!</div>
   <div class="wb" style="font-size:clamp(40px,10vw,78px)">⭐⭐⭐</div>
   <button id="btn-play">🔄 Uudelleen!</button>
@@ -126,7 +126,7 @@ const P = {
   shore:  '#907228', shoreD: '#6a5018',
   riverW: '#2870a8', riverB: '#7a6018',
   hill:   '#6a5a48', hillL:  '#8a7a68', hillD:  '#4a3a2c', snow: '#bab0a0',
-  mushrC: '#a01818', mushrCd:'#681010', mushrS: '#d8c898',
+  mushrC: '#8a5420', mushrCd:'#5a3410', mushrS: '#d8c898',
   skin:   '#e0a060', skinD:  '#b07030',
   hat:    '#283a10', hatD:   '#182408',
   coat:   '#384c10', coatD:  '#243008',
@@ -625,6 +625,15 @@ function buildWorld() {
     if(WATER_DEF.some(w=>Math.hypot(fx-w.x,fy-w.y)<Math.max(w.rx,w.ry)*1.15)) return false;
     if(MOUNT_DEF.some(m=>Math.hypot(fx-m.x,fy-m.y)<m.s*.09)) return false;
     for(const m of MUSHROOMS) if(Math.hypot((fx-m.fx)*WW,(fy-m.fy)*WH)<mSep) return false;
+    // Trees are depth-sorted over the shrooms, so refuse any spot that
+    // would land behind a canopy in front of it (tree base below the
+    // spot, spot inside the sprite's footprint) — keeps every mushroom
+    // at least half-visible.
+    const mx=fx*WW,my=fy*WH;
+    for(const t of TREES){
+      const sz=treeSz*t.m, dy=t.y*WH-my;
+      if(dy>0 && dy<sz*4.2 && Math.abs(t.x*WW-mx)<sz*1.2) return false;
+    }
     return true;
   };
   for(let tries=0; MUSHROOMS.length<nS && tries<3000; tries++){
@@ -2122,22 +2131,25 @@ function drawMushroom(m){
   const wx=m.fx*WW, wy=m.fy*WH;
   const inRange=!m.collected && Math.hypot(char.x-wx,char.y-wy)<PICK_R;
   let x=wpx(wx), y=wpy(wy);
-  const s=Math.max(1,Math.min(4,(treeSz*.12/PS)|0));
+  const s=Math.max(2,Math.min(5,(treeSz*.16/PS)|0));
 
   // Pop animation — mushroom floats up then vanishes
   if(m.collected){
     const t=m.pickT?(gameTime-m.pickT)/PICK_ANIM_DUR:1;
     if(t>=1) return;
     y-=(t*t*18)|0;
+    pr(x-s/2-1|0, y-s*2-1, s+2,   s*2+2, P.outline);
+    pr(x-s*2-2|0, y-s*2-1, s*4+4, Math.max(1,(s*.38)|0)+2, P.outline);
+    pr(x-s*2-1|0, y-s*3-1|0, s*4+2, Math.max(1,(s*1.8)|0)+2, P.outline);
     pr(x-s/2|0,   y-s*2, s,   s*2, '#dcd4b0');
-    pr(x-s*2-1|0, y-s*2, s*4+2, Math.max(1,(s*.38)|0), '#4a0808');
-    pr(x-(s*2)|0, y-s*3|0, s*4, Math.max(1,(s*1.8)|0), '#dd2424');
+    pr(x-s*2-1|0, y-s*2, s*4+2, Math.max(1,(s*.38)|0), '#c8b878');
+    pr(x-(s*2)|0, y-s*3|0, s*4, Math.max(1,(s*1.8)|0), '#a5682a');
     return;
   }
 
   // Bob vertically when in pick range
   y-=inRange?(Math.sin(gameTime*9)*2.5+.5)|0:0;
-  if(x<-20||x>pixW+20||y<-24||y>pixH+4) return;
+  if(x<-24||x>pixW+24||y<-32||y>pixH+6) return;
 
   // AoE2-style selection pip below mushroom when in range
   if(inRange){
@@ -2149,6 +2161,30 @@ function drawMushroom(m){
   // Shadow
   pr(x-s,y+1,s*2,1,'#2a3a10');
 
+  // Cap dome rows — penny bun (herkkutatti), chestnut brown
+  const rowDef=[
+    {f:1.70, col:'#66400f'},
+    {f:1.88, col:'#7a4c15'},
+    {f:2.00, col:'#945c1c'},
+    {f:1.98, col:'#a5682a'},
+    {f:1.88, col:'#965e1e'},
+    {f:1.68, col:'#88541a'},
+    {f:1.40, col:'#7a4c15'},
+    {f:1.05, col:'#6c4210'},
+    {f:0.66, col:'#5e380d'},
+    {f:0.30, col:'#502f0a'},
+  ];
+  const rowH=Math.max(1,(s*.36)|0);
+
+  // Outline pass — 1px dark rim around the whole silhouette so the
+  // sprite stands out from the busy forest floor
+  pr(x-s/2-2|0,  y-s*2, s+4, s*2+1, P.outline);                    // stem
+  pr(x-s*2-2|0,  y-s*2-1, s*4+4, ((s*.38)|0)+2, P.outline);        // underside
+  rowDef.forEach(({f},i)=>{
+    const rw=(s*f)|0, yy=y-s*2-(s*.3*i)|0;
+    pr(x-rw-1,yy-1,rw*2+2,rowH+2,P.outline);
+  });
+
   // Stem — layered: left highlight, center mid, right shadow
   pr(x-s/2|0,    y-s*2, s,   s*2, '#dcd4b0');
   pr(x-s/2|0,    y-s*2, 1,   s*2, '#f0e8c8');
@@ -2156,37 +2192,15 @@ function drawMushroom(m){
   pr(x-s/2-1|0,  y-s,   s+2, 1,   '#e8e0c0');
   pr(x-s/2-1|0,  y-s*1.25|0, s+2, 1, '#d0c8a8');
 
-  // Dark underside of cap
-  pr(x-s*2-1|0,  y-s*2, s*4+2, (s*.38)|0, '#4a0808');
+  // Pale pore underside of cap
+  pr(x-s*2-1|0,  y-s*2, s*4+2, (s*.38)|0, '#c8b878');
 
-  // Cap dome rows — fly agaric
-  const rowDef=[
-    {f:1.70, col:'#8a0e0e'},
-    {f:1.88, col:'#a81414'},
-    {f:2.00, col:'#cc1a1a'},
-    {f:1.98, col:'#dd2424'},
-    {f:1.88, col:'#cc1c1c'},
-    {f:1.68, col:'#bb1818'},
-    {f:1.40, col:'#a81414'},
-    {f:1.05, col:'#961010'},
-    {f:0.66, col:'#840c0c'},
-    {f:0.30, col:'#700808'},
-  ];
-  const rowH=Math.max(1,(s*.36)|0);
   rowDef.forEach(({f,col},i)=>{
     const rw=(s*f)|0;
     const yy=y-s*2-(s*.3*i)|0;
     pr(x-rw,yy,rw*2,rowH,col);
-    pr(x+rw/2|0,yy,(rw*.52)|0,rowH,'#5a0808');
-    if(rw>4) pr(x-rw,yy,Math.max(1,(rw*.20)|0),rowH,'#ee3a3a');
-  });
-
-  // White spots (3 per cap)
-  const ss=Math.max(2,(s*.65)|0);
-  [[x-s*1.0|0,y-s*3.4|0],[x+s*.5|0,y-s*3.8|0],[x-s*.2|0,y-s*4.6|0]].forEach(([sx,sy])=>{
-    pr(sx-1,sy-1,ss+2,ss,'#dcdcd8');
-    pr(sx,  sy,  ss,  ss,'#f8f8f4');
-    pr(sx+(ss/2)|0,sy+(ss/2)|0,1,1,'#ffffff');
+    pr(x+rw/2|0,yy,(rw*.52)|0,rowH,'#42280a');
+    if(rw>4) pr(x-rw,yy,Math.max(1,(rw*.20)|0),rowH,'#c88a3c');
   });
 }
 
@@ -2331,9 +2345,9 @@ function drawGnome(wx,wy,t,moving){
   sp(-16,-11+aw,8,1,GN.basD);
   // Picked mushrooms pile up visibly in the basket
   const fill=MUSHROOMS.length?collected/MUSHROOMS.length:0;
-  if(fill>0)   { sp(-16,-18+aw,3,2,P.mushrC);  sp(-16,-18+aw,1,1,'#d04038'); }
+  if(fill>0)   { sp(-16,-18+aw,3,2,P.mushrC);  sp(-16,-18+aw,1,1,'#b87c38'); }
   if(fill>=0.4){ sp(-12,-18+aw,3,2,'#d8a030'); sp(-12,-18+aw,1,1,'#f0c860'); }
-  if(fill>=0.7){ sp(-14,-20+aw,3,2,P.mushrC);  sp(-14,-20+aw,1,1,'#d04038'); }
+  if(fill>=0.7){ sp(-14,-20+aw,3,2,P.mushrC);  sp(-14,-20+aw,1,1,'#b87c38'); }
 
   sp(-12,-16+aw,4,4,GN.skin); sp( -9,-16+aw,1,4,L.sD); // left hand
   sp(  8,-16-aw,4,4,GN.skin); sp( 11,-16-aw,1,4,L.sD); // right hand
@@ -2463,6 +2477,12 @@ function drawVegetation(charItem){
     const sx=sh.x*WW,sy=sh.y*WH;
     if(sx>x0&&sx<x1&&sy>y0&&sy<y1) items.push({wy:sy,fn:()=>drawShrub(sh)});
   });
+  // Depth-sorted with the trees so a shroom whose base sits behind a
+  // trunk is hidden by the canopy instead of floating on top of it
+  MUSHROOMS.forEach(m=>{
+    const mx=m.fx*WW,my=m.fy*WH;
+    if(mx>x0&&mx<x1&&my>y0&&my<y1) items.push({wy:my,fn:()=>drawMushroom(m)});
+  });
   TREES.forEach(tr=>{
     const tx=tr.x*WW,ty=tr.y*WH;
     if(tx>x0&&tx<x1&&ty>y0&&ty<y1){
@@ -2536,7 +2556,6 @@ function render(){
   MOUNT_DEF.slice().sort((a,b)=>b.s-a.s).forEach(m=>drawHill(m));
   const moving=Math.abs(char.vx)>5||Math.abs(char.vy)>5;
   drawVegetation({wy:char.y,fn:()=>drawGnome(char.x,char.y,gameTime,moving)});
-  MUSHROOMS.forEach(m=>drawMushroom(m));
   PICK_SPARKS.forEach(s=>{
     const px=wpx(s.wx),py=wpy(s.wy);
     if(px<0||px>=pixW||py<0||py>=pixH) return;
