@@ -57,14 +57,25 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 @keyframes winPop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
 .wb{font-size:clamp(50px,13vw,100px);}
 .wm{font-size:clamp(13px,3.2vw,26px);line-height:1.5;color:#5d2600;}
-#btn-play{
-  font-size:clamp(12px,2.8vw,20px);font-family:'PS2P',monospace;
-  padding:clamp(12px,2.5vh,20px) clamp(28px,6vw,56px);
-  background:#e85d04;color:#fff;border:none;border-radius:50px;
-  cursor:pointer;box-shadow:0 6px 0 #9d2700;
-  transition:transform .1s,box-shadow .1s;touch-action:manipulation;
+.win-menu{
+  display:flex;flex-direction:column;gap:10px;
+  max-height:44vh;overflow-y:auto;padding:4px 4px;
 }
-#btn-play:active{transform:translateY(4px);box-shadow:0 2px 0 #9d2700;}
+.win-menu-item{
+  font-size:clamp(11px,2.4vw,16px);font-family:'PS2P',monospace;
+  padding:clamp(8px,1.6vh,14px) clamp(24px,5vw,48px);
+  background:#c9821f;color:#fff;border:none;border-radius:44px;
+  cursor:pointer;box-shadow:0 4px 0 #7a4f10;opacity:.8;
+  transition:transform .1s,box-shadow .1s,background .15s,opacity .15s;
+  touch-action:manipulation;white-space:nowrap;
+}
+.win-menu-item:active{transform:translateY(4px);box-shadow:0 1px 0 #7a4f10;}
+.win-menu-item.sel{
+  background:#2e8b30;box-shadow:0 6px 0 #175c19;opacity:1;transform:scale(1.06);
+}
+.win-menu-item.sel:active{transform:scale(1.06) translateY(4px);box-shadow:0 2px 0 #175c19;}
+.win-menu-item .tag{font-size:.7em;opacity:.85;margin-left:8px;}
+.win-hint{font-size:clamp(9px,1.8vw,12px);color:#5d2600;opacity:.7;font-family:'PS2P',monospace;}
 #mapdisp{
   position:fixed;top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right));z-index:50;
   background:rgba(255,250,230,.95);border:3px solid #b8860b;
@@ -88,7 +99,8 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   <div class="wb">🎉🍄‍🟫🎉</div>
   <div class="wm" id="wm-label">Löysit kaikki sienet!</div>
   <div class="wb" style="font-size:clamp(40px,10vw,78px)">⭐⭐⭐</div>
-  <button id="btn-play">🔄 Uudelleen!</button>
+  <div id="win-menu" class="win-menu"></div>
+  <div class="win-hint">↑ ↓ valitse · Enter pelaa</div>
 </div>
 <script>
 'use strict';
@@ -726,7 +738,15 @@ function easeCamera(dt) {
 
 // ── Input ─────────────────────────────────────────────────────
 const keys={};
-window.addEventListener('keydown',e=>{ keys[e.key]=true; unlockAudio(); if(e.key==='q'||e.key==='Q') toggleSound(); if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); });
+window.addEventListener('keydown',e=>{
+  if(gameWon){
+    if(e.key==='ArrowUp'){ e.preventDefault(); moveWinMenu(-1); }
+    else if(e.key==='ArrowDown'){ e.preventDefault(); moveWinMenu(1); }
+    else if(e.key==='Enter'||e.key===' '){ e.preventDefault(); playSelectedWinMap(); }
+    return;
+  }
+  keys[e.key]=true; unlockAudio(); if(e.key==='q'||e.key==='Q') toggleSound(); if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+});
 window.addEventListener('keyup',  e=>{ keys[e.key]=false; });
 const joy={active:false,bx:0,by:0,dx:0,dy:0};
 const joyBase=document.getElementById('joy-base');
@@ -735,15 +755,6 @@ const JR=50;
 canvas.addEventListener('touchstart',e=>{ e.preventDefault(); unlockAudio(); const t=e.changedTouches[0]; joy.active=true;joy.bx=t.clientX;joy.by=t.clientY;joy.dx=0;joy.dy=0; joyBase.style.left=t.clientX+'px';joyBase.style.top=t.clientY+'px';joyBase.style.display='block'; },{passive:false});
 canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.changedTouches[0]; const dx=t.clientX-joy.bx,dy=t.clientY-joy.by; const a=Math.atan2(dy,dx),cl=Math.min(Math.hypot(dx,dy),JR)/JR; joy.dx=Math.cos(a)*cl;joy.dy=Math.sin(a)*cl; joyKnob.style.left=(50+joy.dx*JR)+'px';joyKnob.style.top=(50+joy.dy*JR)+'px'; },{passive:false});
 canvas.addEventListener('touchend', e=>{ e.preventDefault(); joy.active=false;joy.dx=0;joy.dy=0;joyBase.style.display='none'; },{passive:false});
-// Mouse: the gnome simply follows the cursor (no button needed) — the
-// desktop counterpart of the touch joystick. He stops in the dead zone
-// under the cursor, when the pointer leaves the window, or while
-// keyboard/joystick input is active (those take precedence). Touch
-// handlers preventDefault, so no synthetic mouse events interfere.
-const mouse={active:false,cx:0,cy:0};
-window.addEventListener('mousemove',e=>{ mouse.active=true; mouse.cx=e.clientX; mouse.cy=e.clientY; });
-document.addEventListener('mouseleave',()=>{ mouse.active=false; });
-window.addEventListener('blur',()=>{ mouse.active=false; });
 function inputDir() {
   let dx=0,dy=0;
   if(keys['ArrowLeft']||keys['a']||keys['A'])  dx-=1;
@@ -751,13 +762,6 @@ function inputDir() {
   if(keys['ArrowUp']||keys['w']||keys['W'])    dy-=1;
   if(keys['ArrowDown']||keys['s']||keys['S'])  dy+=1;
   if(joy.active){dx+=joy.dx;dy+=joy.dy;}
-  if(dx===0&&dy===0&&mouse.active){
-    // steer toward the cursor; small dead zone so he settles under it
-    // instead of jittering when the cursor is on top of him
-    const mx=mouse.cx-(char.x-cam.x), my=mouse.cy-(char.y-cam.y);
-    const md=Math.hypot(mx,my);
-    if(md>24){ dx=mx/md; dy=my/md; }
-  }
   const l=Math.hypot(dx,dy);
   return l>0?{dx:dx/l,dy:dy/l}:{dx:0,dy:0};
 }
@@ -2690,11 +2694,56 @@ function updateHungerHud(){
 }
 
 // ── Win ───────────────────────────────────────────────────────
+const COMPLETED_MAPS_KEY='sieni-completed-maps';
+function loadCompletedMaps(){
+  try{ return new Set(JSON.parse(localStorage.getItem(COMPLETED_MAPS_KEY)||'[]')); }
+  catch{ return new Set(); }
+}
+function markMapCompleted(n){
+  const s=loadCompletedMaps(); s.add(n);
+  try{ localStorage.setItem(COMPLETED_MAPS_KEY,JSON.stringify([...s])); }catch{}
+}
+
+let winMenuMaps=[], winMenuSel=0;
+
+function buildWinMenu(){
+  const maps=loadCompletedMaps();
+  maps.add(mapNum);
+  if(mapNum<10) maps.add(mapNum+1);
+  winMenuMaps=[...maps].sort((a,b)=>a-b);
+  winMenuSel=Math.max(0,winMenuMaps.indexOf(mapNum<10?mapNum+1:mapNum));
+  renderWinMenu();
+}
+
+function renderWinMenu(){
+  const wrap=document.getElementById('win-menu');
+  wrap.innerHTML='';
+  winMenuMaps.forEach((n,i)=>{
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='win-menu-item'+(i===winMenuSel?' sel':'');
+    b.innerHTML='Kartta '+n+(n===mapNum?' <span class="tag">(nykyinen)</span>':n>mapNum?' <span class="tag">UUSI!</span>':'');
+    b.addEventListener('click',()=>{ winMenuSel=i; playSelectedWinMap(); });
+    wrap.appendChild(b);
+  });
+  wrap.children[winMenuSel]?.scrollIntoView({block:'nearest'});
+}
+
+function moveWinMenu(delta){
+  winMenuSel=Math.max(0,Math.min(winMenuMaps.length-1,winMenuSel+delta));
+  renderWinMenu();
+}
+
+function playSelectedWinMap(){
+  const n=winMenuMaps[winMenuSel];
+  if(n===mapNum) startGame(); else goToMap(n);
+}
+
 function showWin(){
   gameWon=true;
-  const win=document.getElementById('win');
-  win.classList.add('show');
-  document.getElementById('btn-play').focus();
+  markMapCompleted(mapNum);
+  buildWinMenu();
+  document.getElementById('win').classList.add('show');
   playWin();confetti();
 }
 
@@ -2724,7 +2773,6 @@ function resize(){
 }
 
 function startGame(){
-  document.getElementById('btn-play').blur();
   collected=0; gameWon=false; gameTime=0; PICK_SPARKS=[];
   fullness=1; lastHungerPct=-1; UNDERSTORY.forEach(u=>u.eaten=false);
   bilEaten=0; lingEaten=0;
@@ -2737,7 +2785,12 @@ function startGame(){
   snapCam();
 }
 
-document.getElementById('btn-play').addEventListener('click',startGame);
+function goToMap(n){
+  if(n<1||n>10) return;
+  const params=new URLSearchParams(location.search);
+  params.set('map',n);
+  location.search=params.toString();
+}
 window.addEventListener('resize',resize);
 document.getElementById('mapnum').textContent=mapNum;
 
