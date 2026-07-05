@@ -1080,6 +1080,79 @@ function playEat(){ beep(330,.09,.16); setTimeout(()=>beep(262,.12,.14),70); }
 // on small speakers.
 function playBump(){ beep(392,.14,.24); setTimeout(()=>beep(277,.18,.20),50); }
 
+// ── Footsteps ─────────────────────────────────────────────────
+// The reference sound is a hedgehog shuffling through a pile of dry
+// leaves: no thud, no tone — just a brief dense shower of tiny crackles.
+// The bed is "crackle noise": a second of silence sprinkled with hundreds
+// of minuscule decaying spikes (leaf confetti), nothing like a smooth
+// noise wash. Each step plays a random slice of it.
+let stepBuf=null;
+function stepNoise(){
+  if(!stepBuf){
+    const c=ac(), sr=c.sampleRate;
+    stepBuf=c.createBuffer(1,sr,sr);
+    const d=stepBuf.getChannelData(0);
+    for(let i=0;i<d.length;i++){
+      if(Math.random()<650/sr){ // ~650 crackles per second
+        const a=(Math.random()*2-1)*(0.25+Math.random()*0.75);
+        const len=8+(Math.random()*36|0); // spike: a fraction of a ms
+        for(let j=0;j<len&&i+j<d.length;j++) d[i+j]+=a*(1-j/len)**2;
+      }
+    }
+  }
+  return stepBuf;
+}
+// One rustle: a random slice of the crackle bed through a broad bandpass.
+// rate re-pitches the crackles wholesale — slower = sparser, fatter snaps
+// (gravel underfoot), faster = finer, crisper ones (bare rock).
+function stepRustle({f,vol,dur,atk=.025,rate=1}){
+  try{
+    const c=ac(), t=c.currentTime;
+    const s=c.createBufferSource(); s.buffer=stepNoise(); s.playbackRate.value=rate;
+    const flt=c.createBiquadFilter();
+    flt.type='bandpass'; flt.frequency.value=f; flt.Q.value=.7;
+    // swell in, hold while the foot settles, then die away — setTargetAtTime
+    // for the fade so the tail vanishes naturally instead of trailing
+    const g=c.createGain();
+    g.gain.setValueAtTime(.0001,t);
+    g.gain.linearRampToValueAtTime(vol,t+atk);
+    g.gain.setTargetAtTime(.0001,t+atk+dur*.35,dur*.22);
+    s.connect(flt); flt.connect(g); g.connect(c.destination);
+    s.start(t,Math.random()*(stepBuf.duration-.5)); // fresh leaves each step
+    s.stop(t+atk+dur+.2);
+  }catch(e){}
+}
+// Terrain shifts the rustle, never replaces it: f = brightness, rate =
+// crackle grain, dur/vol = how much litter the foot stirs. Water drops the
+// band low enough that the crackles smear together into a slosh.
+// STEP_VOL scales every footstep at once — the one number to touch when
+// the whole walk needs to come up or down in the mix.
+const STEP_VOL=1;
+const STEP_SURF={
+  grass: {f:2400,vol:.50,dur:.17,rate:1},
+  sand:  {f:1500,vol:.38,dur:.16,rate:.85},
+  gravel:{f:1800,vol:.52,dur:.15,rate:.6},
+  rock:  {f:3200,vol:.36,dur:.09,rate:1.4},
+  marsh: {f:1000,vol:.48,dur:.20,rate:.75},
+  water: {f:800, vol:.55,dur:.28,rate:.55},
+};
+// foot alternates 0/1 per stride; a whisper of variation keeps the
+// left-right-left pattern from sounding machine-stamped.
+function playStep(surf,foot,wd){
+  const v=(foot?1.07:1)*(0.95+Math.random()*0.10);
+  const p=STEP_SURF[surf]||STEP_SURF.grass;
+  const deep=surf==='water'?Math.min(1,wd*1.5):0; // wading deeper: darker, longer, fuller
+  stepRustle({f:p.f*v*(1-.3*deep), vol:(p.vol+.12*deep)*STEP_VOL, dur:p.dur+.10*deep, rate:p.rate});
+}
+// Cadence is distance-based — one stride per STEP_LEN of actual movement —
+// so wading, climbing and hunger slow the footfall rhythm exactly as much
+// as they slow Gubbe. While standing still the accumulator is kept nearly
+// full so the first step lands almost immediately on moving off.
+// 105px per stride ≈ 2.1 steps/s at full walking speed — an unhurried
+// amble; anything brisker reads as scurrying.
+const STEP_LEN=105;
+let stepAcc=0, stepFoot=0;
+
 // ── Background music ──────────────────────────────────────────
 // Fully procedural like the sound effects: each map gets its own looping
 // tune, generated deterministically from mapNum so map 3 always hums the
@@ -3390,6 +3463,7 @@ function update(dt){
     ax=(dx-dy*weave)*lilt; ay=(dy+dx*weave)*lilt;
   }
   let mx=ax*spd*dt, my=ay*spd*dt;
+  const px=char.x, py=char.y; // pre-move position, for footstep cadence
   let nx=clamp(char.x+mx,CHAR_R,WW-CHAR_R), ny=clamp(char.y+my,CHAR_R,WH-CHAR_R);
   const inTree=treeAt(char.x,char.y);
   if(inTree){
@@ -3453,6 +3527,20 @@ function update(dt){
     }
     bumpHut=hb?hb.h:null;
   }
+  // Footsteps: distance actually covered this frame feeds the stride
+  // accumulator, so getting wedged against a trunk goes quiet instead of
+  // stamping in place. Surface picks the timbre — water trumps everything
+  // (splashes over whatever lies beneath), then mountain slope reads as
+  // rock, then the terrain zone underfoot.
+  if(dx||dy){
+    stepAcc+=Math.hypot(char.x-px,char.y-py);
+    if(stepAcc>=STEP_LEN){
+      stepAcc-=STEP_LEN; stepFoot^=1;
+      const surf=wd>0?'water':onMountainAt(char.x,char.y)?'rock':
+        ['grass','sand','marsh','rock','gravel'][terrainAt(char.x/WW,char.y/WH)];
+      playStep(surf,stepFoot,wd);
+    }
+  } else stepAcc=STEP_LEN*0.7;
   char.vx=dx*spd; char.vy=dy*spd;
   easeCamera(dt);
   PICK_SPARKS.forEach(s=>{s.age+=dt;s.wx+=s.vx*dt;s.wy+=s.vy*dt;s.vy+=55*dt;});
