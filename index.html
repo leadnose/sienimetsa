@@ -79,7 +79,8 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 <div id="hud"><canvas class="hico" id="ico-basket"></canvas> <span id="cnt">0</span> / <span id="tot">?</span>
   <span id="hsep">·</span> <canvas class="hico" id="ico-bil"></canvas> <span id="bcnt">0</span>
   <span id="hsep2">·</span> <canvas class="hico" id="ico-ling"></canvas> <span id="lcnt">0</span>
-  <canvas id="hbarcv"></canvas></div>
+  <canvas id="hbarcv"></canvas>
+  <canvas class="hico" id="ico-sound" style="cursor:pointer" title="Ääni päällä/pois"></canvas></div>
 <div id="mapdisp"><canvas class="hico" id="ico-map"></canvas> Map <span id="mapnum">1</span></div>
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
@@ -820,7 +821,24 @@ function ac(){if(!aCtx)aCtx=new(window.AudioContext||window.webkitAudioContext)(
 // on the first touch/key so the first pick-sound isn't swallowed.
 function unlockAudio(){
   if(audioUnlocked) return;
-  try{ const c=ac(); if(c.state==='suspended') c.resume(); audioUnlocked=true; }catch(e){}
+  try{
+    const c=ac();
+    c.onstatechange=updateSoundIcon;
+    if(c.state==='suspended') c.resume().then(updateSoundIcon).catch(()=>{});
+    audioUnlocked=true;
+  }catch(e){}
+  updateSoundIcon();
+}
+// Manual retry/mute — lets the player fix the (unavoidable) cases where the
+// autoplay-unlock above doesn't take, and mute/unmute afterwards.
+function toggleSound(){
+  try{
+    const c=ac();
+    c.onstatechange=updateSoundIcon;
+    if(c.state==='running') c.suspend().then(updateSoundIcon).catch(()=>{});
+    else c.resume().then(updateSoundIcon).catch(()=>{});
+  }catch(e){}
+  updateSoundIcon();
 }
 function beep(freq,dur,vol=.22){
   try{const c=ac(),o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=freq;o.type='sine';g.gain.setValueAtTime(vol,c.currentTime);g.gain.exponentialRampToValueAtTime(.001,c.currentTime+dur);o.start(c.currentTime);o.stop(c.currentTime+dur);}catch(e){}
@@ -872,6 +890,33 @@ function initHudIcons(){
     [3,3,3,1,'#7a5216'],[7,4,2,1,'#7a5216'],
   ]);
   const bar=document.getElementById('hbarcv'); bar.width=32; bar.height=10;
+}
+// speaker glyph filling most of the 12x12 icon, with either sound-wave bars
+// (on) or a bold diagonal mute slash across the whole glyph (off) — a slash
+// reads at HUD-icon size where a cramped X wouldn't. Reflects the *actual*
+// AudioContext state, not just "we tried to unlock it", since that's what
+// can silently drift.
+let soundIconOn=null;
+function drawSoundIcon(on){
+  const cv=document.getElementById('ico-sound'); cv.width=12; cv.height=12;
+  const c=cv.getContext('2d'); c.clearRect(0,0,12,12);
+  const body='#5d3200';
+  const speaker=[[8,2,1,1],[7,3,2,1],[1,4,8,4],[7,8,2,1],[8,9,1,1]];
+  for(const r of speaker){ c.fillStyle=body; c.fillRect(r[0],r[1],r[2],r[3]); }
+  if(on){
+    c.fillStyle='#8ac926';
+    c.fillRect(9,5,1,2);
+    c.fillRect(11,3,1,6);
+  }else{
+    c.fillStyle='#c02020';
+    for(let i=0;i<12;i++) c.fillRect(10-i,i,3,1);
+  }
+}
+function updateSoundIcon(){
+  const on=!!(aCtx && aCtx.state==='running');
+  if(on===soundIconOn) return;
+  soundIconOn=on;
+  drawSoundIcon(on);
 }
 
 // ── DOM effects ───────────────────────────────────────────────
@@ -2585,6 +2630,12 @@ window.addEventListener('resize',resize);
 document.getElementById('mapnum').textContent=mapNum;
 
 initHudIcons();
+updateSoundIcon();
+document.getElementById('ico-sound').addEventListener('click',e=>{ e.stopPropagation(); toggleSound(); });
+// statechange doesn't fire in every engine (seen on some WebViews), so poll
+// as a cheap reliability net — this is the only way to guarantee the icon
+// never lies about whether sound will actually play.
+setInterval(updateSoundIcon,1500);
 resize();
 startGame();
 let lastT=0;
