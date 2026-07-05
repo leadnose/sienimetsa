@@ -48,41 +48,50 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
 }
 #win{
   position:fixed;inset:0;z-index:300;
-  display:none;flex-direction:column;align-items:center;justify-content:center;
-  gap:clamp(12px,3vh,28px);text-align:center;
+  display:none;flex-direction:column;align-items:center;
+  gap:clamp(6px,1.2vh,14px);text-align:center;
+  padding:clamp(8px,1.6vh,20px) clamp(8px,2.5vw,28px);
   background:rgba(255,220,40,.94);backdrop-filter:blur(4px);
   font-family:'PS2P',monospace;
 }
 #win.show{display:flex;animation:winPop .6s cubic-bezier(.175,.885,.32,1.275);}
 @keyframes winPop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
-.wb{font-size:clamp(50px,13vw,100px);}
-.wm{font-size:clamp(13px,3.2vw,26px);line-height:1.5;color:#5d2600;}
+.wb{font-size:clamp(28px,7vw,60px);}
+.wm{font-size:clamp(12px,2.6vw,22px);line-height:1.4;color:#5d2600;}
 .win-menu{
-  display:flex;flex-direction:column;gap:10px;
-  max-height:44vh;overflow-y:auto;padding:4px 4px;
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));
+  gap:clamp(8px,1.6vw,16px);
+  width:100%;max-width:1400px;flex:1 1 auto;min-height:0;
+  overflow-y:auto;padding:6px;
 }
 .win-menu-item{
-  font-size:clamp(11px,2.4vw,16px);font-family:'PS2P',monospace;
-  padding:clamp(8px,1.6vh,14px) clamp(24px,5vw,48px);
-  background:#c9821f;color:#fff;border:none;border-radius:44px;
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  font-size:clamp(10px,1.6vw,13px);font-family:'PS2P',monospace;
+  padding:10px 10px 12px;
+  background:#c9821f;color:#fff;border:none;border-radius:16px;
   cursor:pointer;box-shadow:0 4px 0 #7a4f10;opacity:.8;
   transition:transform .1s,box-shadow .1s,background .15s,opacity .15s;
-  touch-action:manipulation;white-space:nowrap;
+  touch-action:manipulation;
 }
 .win-menu-item:active{transform:translateY(4px);box-shadow:0 1px 0 #7a4f10;}
 .win-menu-item.sel{
-  background:#2e8b30;box-shadow:0 6px 0 #175c19;opacity:1;transform:scale(1.06);
+  background:#2e8b30;box-shadow:0 6px 0 #175c19;opacity:1;transform:scale(1.04);
 }
-.win-menu-item.sel:active{transform:scale(1.06) translateY(4px);box-shadow:0 2px 0 #175c19;}
-.win-menu-item .tag{font-size:.7em;opacity:.85;margin-left:8px;}
-.win-hint{font-size:clamp(9px,1.8vw,12px);color:#5d2600;opacity:.7;font-family:'PS2P',monospace;}
+.win-menu-item.sel:active{transform:scale(1.04) translateY(4px);box-shadow:0 2px 0 #175c19;}
+.win-menu-item .title-row{display:flex;align-items:center;gap:6px;justify-content:center;flex-wrap:wrap;}
+.win-menu-item .tag{font-size:.7em;opacity:.85;}
+.win-menu-item .desc{display:block;white-space:normal;font-size:.85em;font-weight:normal;opacity:.9;line-height:1.35;}
+.map-preview{width:100%;height:auto;display:block;border-radius:8px;border:2px solid rgba(0,0,0,.25);image-rendering:pixelated;background:#2a4010;}
+.map-icon{width:18px;height:18px;image-rendering:pixelated;flex:none;}
+.win-hint{font-size:clamp(9px,1.8vw,12px);color:#5d2600;opacity:.7;font-family:'PS2P',monospace;flex:none;}
 #mapdisp{
   position:fixed;top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right));z-index:50;
   background:rgba(255,250,230,.95);border:3px solid #b8860b;
   padding:10px 18px;cursor:pointer;
   font:400 clamp(9px,2.1vw,13px)/1 'PS2P',monospace;
-  color:#5d3200;box-shadow:0 3px 14px rgba(0,0,0,.18);
+  color:#5d3200;display:flex;align-items:center;gap:6px;box-shadow:0 3px 14px rgba(0,0,0,.18);
 }
+#mapname{color:#8a5a10;}
 #homearrow{
   position:fixed;z-index:45;display:none;
   width:34px;height:34px;line-height:34px;text-align:center;
@@ -105,7 +114,7 @@ canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   <span id="hsep2">·</span> <canvas class="hico" id="ico-ling"></canvas> <span id="lcnt">0</span>
   <canvas id="hbarcv"></canvas>
   <canvas class="hico" id="ico-sound" style="cursor:pointer" title="Ääni päällä/pois"></canvas></div>
-<div id="mapdisp" title="Valitse kartta"><canvas class="hico" id="ico-map"></canvas> Map <span id="mapnum">1</span></div>
+<div id="mapdisp" title="Valitse kartta"><canvas class="hico" id="ico-map"></canvas> <span id="mapname"></span></div>
 <div id="mm-wrap"><canvas id="minimap"></canvas></div>
 <div id="joy-zone"><div id="joy-base"><div id="joy-knob"></div></div></div>
 <div id="homearrow">➤</div>
@@ -175,6 +184,36 @@ const TR_DECIDUOUS=0, TR_PINE=1, TR_SPRUCE=2, TR_FIR=3, TR_SCOTS=4;
 const U_BILBERRY=0, U_LINGONBERRY=1, U_FERN=2, U_MOSS=3, U_GRASS_TUFT=4;
 const WORLD_SCALE=7; // world is WORLD_SCALE × viewport size
 const NUM_VARIANTS=8; // shape variants per tree species+size
+
+// ── Per-map biome ─────────────────────────────────────────────
+// Each of the 10 maps gets a fixed, hand-picked character instead of every
+// map rolling the same recipe: tree density/species mix, water/mountain
+// abundance, terrain-zone bias, and a colour-grade tint all shift per map
+// so "map 3" and "map 8" read as different places, not just different noise.
+const BIOMES=[
+  {name:'Kotimetsä',  desc:'Tavallinen sekametsä, vähän kaikkea.', treeMul:1.00, speciesMul:{}, waterMul:1.00, mountMul:1.00,
+   terrainW:{sand:2,marsh:2,rock:2,gravel:2}, mushroomMul:1.00, tint:{color:'#ffedc0',a:.05,mode:'multiply'}},
+  {name:'Järviseutu', desc:'Runsaasti järviä ja jokia, harvempi metsä.', treeMul:0.80, speciesMul:{}, waterMul:2.20, mountMul:0.50,
+   terrainW:{sand:3,marsh:3,rock:1,gravel:1}, mushroomMul:1.00, tint:{color:'#bcd8e8',a:.10,mode:'multiply'}},
+  {name:'Tiheikkö',   desc:'Tiheä ryteikkö, puu puun vieressä.', treeMul:1.40, speciesMul:{}, waterMul:0.40, mountMul:0.70,
+   terrainW:{sand:1,marsh:2,rock:1,gravel:1}, mushroomMul:1.10, tint:{color:'#0a1f08',a:.12,mode:'multiply'}},
+  {name:'Kangas',     desc:'Aurinkoinen hiekkakangas mäntyineen.', treeMul:0.60, speciesMul:{[TR_SCOTS]:1.8,[TR_PINE]:1.3,[TR_DECIDUOUS]:0.5,[TR_SPRUCE]:0.4,[TR_FIR]:0.4},
+   waterMul:0.50, mountMul:0.60, terrainW:{sand:7,marsh:1,rock:1,gravel:2}, mushroomMul:0.90, tint:{color:'#f0d888',a:.10,mode:'multiply'}},
+  {name:'Vaara',      desc:'Karut tunturit ja kivikkoiset rinteet.', treeMul:0.75, speciesMul:{[TR_SCOTS]:1.5,[TR_SPRUCE]:1.2,[TR_DECIDUOUS]:0.5},
+   waterMul:0.60, mountMul:2.00, terrainW:{sand:1,marsh:1,rock:6,gravel:3}, mushroomMul:0.95, tint:{color:'#c8d4dc',a:.10,mode:'multiply'}},
+  {name:'Suo',        desc:'Märkä suoseutu, sammalta joka askeleella.', treeMul:0.90, speciesMul:{[TR_SPRUCE]:1.3,[TR_DECIDUOUS]:1.2,[TR_PINE]:1.1,[TR_FIR]:0.6,[TR_SCOTS]:0.4},
+   waterMul:1.30, mountMul:0.40, terrainW:{sand:1,marsh:7,rock:1,gravel:1}, mushroomMul:1.05, tint:{color:'#5a5828',a:.14,mode:'multiply'}},
+  {name:'Kuusikko',   desc:'Synkkä, tiheä kuusimetsä.', treeMul:1.25, speciesMul:{[TR_SPRUCE]:2.0,[TR_FIR]:1.3,[TR_DECIDUOUS]:0.4,[TR_SCOTS]:0.5},
+   waterMul:0.80, mountMul:0.90, terrainW:{sand:1,marsh:2,rock:2,gravel:1}, mushroomMul:1.05, tint:{color:'#14282a',a:.12,mode:'multiply'}},
+  {name:'Koivikko',   desc:'Valoisa koivikko, väljästi puita.', treeMul:0.70, speciesMul:{[TR_DECIDUOUS]:2.0,[TR_PINE]:0.6,[TR_SPRUCE]:0.4,[TR_FIR]:0.5,[TR_SCOTS]:0.6},
+   waterMul:1.10, mountMul:0.60, terrainW:{sand:2,marsh:2,rock:1,gravel:1}, mushroomMul:1.00, tint:{color:'#e8f0a8',a:.06,mode:'multiply'}},
+  {name:'Erämaa',     desc:'Suuri erämaa: vuoria, vesiä ja tiheikköä.', treeMul:1.20, speciesMul:{}, waterMul:1.40, mountMul:1.60,
+   terrainW:{sand:2,marsh:2,rock:3,gravel:2}, mushroomMul:1.15, tint:{color:'#ff9848',a:.10,mode:'multiply'}},
+  {name:'Utumaa',     desc:'Utuinen, usvan peittämä maisema.', treeMul:0.95, speciesMul:{}, waterMul:1.00, mountMul:0.80,
+   terrainW:{sand:2,marsh:2,rock:2,gravel:2}, mushroomMul:1.00, tint:{color:'#e8ecf0',a:.16,mode:'source-over'}},
+];
+const BIOME=BIOMES[(mapNum-1)%BIOMES.length];
+const spMul=(t)=>BIOME.speciesMul[t]??1;
 
 // ── World data ────────────────────────────────────────────────
 let WATER_DEF=[], RIVERS=[], MOUNT_DEF=[], TERRAIN_ZONES=[];
@@ -290,8 +329,9 @@ function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
 
 function generateWorld(seed){
   const r = mkRng(seed * 6271 + 9973);
+  const biome = BIOMES[(seed-1)%BIOMES.length]; // keyed off seed, not the live map, so previews for other maps get their own biome
   MOUNT_DEF = [];
-  const nM = 6 + Math.floor(r()*6);
+  const nM = Math.max(1, Math.round((6 + Math.floor(r()*6)) * biome.mountMul));
   const nCl = 1 + Math.floor(r()*2 + (r()>.55?1:0));
   const clX = Array.from({length:nCl}, ()=> 0.18+r()*.64);
   const clY = Array.from({length:nCl}, ()=> 0.04+r()*.30);
@@ -304,7 +344,7 @@ function generateWorld(seed){
     });
   }
   WATER_DEF = [];
-  const nW = 4+Math.floor(r()*3);
+  const nW = Math.max(0, Math.round((4+Math.floor(r()*3)) * biome.waterMul));
   for(let tries=0; WATER_DEF.length<nW && tries<100; tries++){
     const wx=0.06+r()*.88, wy=0.12+r()*.80;
     const clearM = MOUNT_DEF.every(m=>Math.hypot(wx-m.x,wy-m.y)>m.s*.13+0.10);
@@ -352,7 +392,11 @@ function generateWorld(seed){
   // Terrain zones: 1=sand 2=marsh 3=rock 4=gravel
   TERRAIN_ZONES = [];
   const nTZ = 18 + Math.floor(r()*10);
-  const tzPool = [T_SAND,T_SAND,T_MARSH,T_MARSH,T_ROCK,T_ROCK,T_GRAVEL,T_GRAVEL];
+  const tw = biome.terrainW, tzPool = [];
+  for(let i=0;i<tw.sand;i++) tzPool.push(T_SAND);
+  for(let i=0;i<tw.marsh;i++) tzPool.push(T_MARSH);
+  for(let i=0;i<tw.rock;i++) tzPool.push(T_ROCK);
+  for(let i=0;i<tw.gravel;i++) tzPool.push(T_GRAVEL);
   for(let tries=0; TERRAIN_ZONES.length<nTZ && tries<300; tries++){
     const tx=0.04+r()*.92, ty=0.04+r()*.92;
     const inW=WATER_DEF.some(w=>Math.hypot(tx-w.x,ty-w.y)<Math.max(w.rx,w.ry)*1.8);
@@ -612,16 +656,16 @@ function buildWorld() {
   // the highlands around the mountain cluster centre (mCX,mCY); broadleaf and
   // mixed stands fill the lowlands. Edit `n` to tune density per stand.
   const STANDS=[
-    {n:3000, gen:()=>({x:r()*.42,                       y:.50+r()*.48,                  t:TR_DECIDUOUS,                 m:0.8+r()*.5})},
-    {n:1440, gen:()=>({x:clamp(mCX-.15+r()*.30,0,1),    y:r()*.55,                      t:TR_PINE,                      m:0.8+r()*.4})},
-    {n: 900, gen:()=>({x:clamp(mCX+r()*.40,0,1),        y:clamp(mCY+r()*.35,0,.55),     t:TR_PINE,                      m:0.7+r()*.5})},
-    {n:2250, gen:()=>({x:r(),                           y:r(),                          t:r()>.45?TR_PINE:TR_DECIDUOUS, m:0.7+r()*.6})},
-    {n:1080, gen:()=>({x:r()*.44,                       y:r()*.58,                      t:TR_SPRUCE,                    m:0.7+r()*1.1})},
-    {n: 900, gen:()=>({x:clamp(mCX-.1+r()*.45,0,1),     y:r()*.48,                      t:TR_SPRUCE,                    m:0.8+r()*1.0})},
-    {n: 660, gen:()=>({x:r(),                           y:r(),                          t:TR_SPRUCE,                    m:0.5+r()*1.2})},
-    {n:1020, gen:()=>({x:r(),                           y:r(),                          t:TR_FIR,                       m:0.7+r()*.8})},
-    {n: 540, gen:()=>({x:r()*.38,                       y:.52+r()*.42,                  t:TR_FIR,                       m:0.9+r()*.9})},
-    {n: 690, gen:()=>({x:r(),                           y:r(),                          t:TR_SCOTS,                     m:0.9+r()*.9})},
+    {n:Math.round(3000*BIOME.treeMul*spMul(TR_DECIDUOUS)), gen:()=>({x:r()*.42,                    y:.50+r()*.48,                  t:TR_DECIDUOUS,                 m:0.8+r()*.5})},
+    {n:Math.round(1440*BIOME.treeMul*spMul(TR_PINE)),      gen:()=>({x:clamp(mCX-.15+r()*.30,0,1), y:r()*.55,                      t:TR_PINE,                      m:0.8+r()*.4})},
+    {n:Math.round( 900*BIOME.treeMul*spMul(TR_PINE)),      gen:()=>({x:clamp(mCX+r()*.40,0,1),     y:clamp(mCY+r()*.35,0,.55),     t:TR_PINE,                      m:0.7+r()*.5})},
+    {n:Math.round(2250*BIOME.treeMul),                     gen:()=>({x:r(),                        y:r(),                          t:r()>.45?TR_PINE:TR_DECIDUOUS, m:0.7+r()*.6})},
+    {n:Math.round(1080*BIOME.treeMul*spMul(TR_SPRUCE)),    gen:()=>({x:r()*.44,                    y:r()*.58,                      t:TR_SPRUCE,                    m:0.7+r()*1.1})},
+    {n:Math.round( 900*BIOME.treeMul*spMul(TR_SPRUCE)),    gen:()=>({x:clamp(mCX-.1+r()*.45,0,1),  y:r()*.48,                      t:TR_SPRUCE,                    m:0.8+r()*1.0})},
+    {n:Math.round( 660*BIOME.treeMul*spMul(TR_SPRUCE)),    gen:()=>({x:r(),                        y:r(),                          t:TR_SPRUCE,                    m:0.5+r()*1.2})},
+    {n:Math.round(1020*BIOME.treeMul*spMul(TR_FIR)),       gen:()=>({x:r(),                        y:r(),                          t:TR_FIR,                       m:0.7+r()*.8})},
+    {n:Math.round( 540*BIOME.treeMul*spMul(TR_FIR)),       gen:()=>({x:r()*.38,                    y:.52+r()*.42,                  t:TR_FIR,                       m:0.9+r()*.9})},
+    {n:Math.round( 690*BIOME.treeMul*spMul(TR_SCOTS)),     gen:()=>({x:r(),                        y:r(),                          t:TR_SCOTS,                     m:0.9+r()*.9})},
   ];
   TREES = [];
   for(const {n,gen} of STANDS) for(let i=0;i<n;i++) TREES.push(gen());
@@ -696,7 +740,7 @@ function buildWorld() {
   // visible and reachable; a spacing rule keeps them spread across the map.
   MUSHROOMS=[];
   const sr=mkRng(mapNum*7919+23);
-  const nS=18+((sr()*9)|0);
+  const nS=Math.max(10, Math.round((18+((sr()*9)|0)) * BIOME.mushroomMul));
   const mSep=Math.min(WW,WH)*0.03;
   const spotOK=(fx,fy)=>{
     if(pathCodeAt(fx*WW,fy*WH)>=2) return false; // already picked clean along main trails
@@ -1001,11 +1045,12 @@ function playBump(){ beep(392,.14,.24); setTimeout(()=>beep(277,.18,.20),50); }
 // Drawn once into tiny canvases (upscaled by CSS with pixelated
 // rendering) so the HUD looks identical on every platform — emoji
 // glyphs vary wildly between OSes. Colours follow the game palette.
-function hudIcon(id,rects){
-  const cv=document.getElementById(id); cv.width=12; cv.height=12;
+function drawIconOnCanvas(cv,rects){
+  cv.width=12; cv.height=12;
   const c=cv.getContext('2d');
   for(const r of rects){ c.fillStyle=r[4]; c.fillRect(r[0],r[1],r[2],r[3]); }
 }
+function hudIcon(id,rects){ drawIconOnCanvas(document.getElementById(id),rects); }
 function initHudIcons(){
   hudIcon('ico-basket',[ // woven basket with arched handle
     [4,0,4,1,'#7a5216'],[3,1,1,1,'#7a5216'],[8,1,1,1,'#7a5216'],
@@ -1027,14 +1072,55 @@ function initHudIcons(){
     [2,7,8,1,'#b01018'],[3,8,6,1,'#b01018'],[4,9,4,1,'#b01018'],
     [4,4,2,2,'#ff7a60'],
   ]);
-  hudIcon('ico-map',[ // trail signpost with an arrow board
-    [5,1,2,10,'#7a5216'],
-    [1,2,9,4,'#c89238'],[10,3,1,2,'#c89238'],
-    [1,5,9,1,'#8a5a10'],
-    [3,3,3,1,'#7a5216'],[7,4,2,1,'#7a5216'],
-  ]);
   const bar=document.getElementById('hbarcv'); bar.width=32; bar.height=10;
 }
+// One little pixel-art scene per biome (same 12×12/fillRect style as the
+// other HUD icons) so the map chip reads as "which kind of place" at a
+// glance, not just a generic signpost — order matches BIOMES.
+const MAP_ICONS=[
+  [ // Kotimetsä: plain mixed-forest tree
+    [5,1,2,1,P.grassL],[4,2,4,2,P.grassL],[3,4,6,2,P.grass],[2,6,8,2,P.grass],
+    [5,8,2,3,P.trunk],
+  ],
+  [ // Järviseutu: round pond
+    [3,2,6,1,P.waterL],[2,3,8,1,P.waterL],[1,4,10,3,P.water],[2,7,8,1,P.waterD],[3,8,6,1,P.waterD],
+  ],
+  [ // Tiheikkö: two crowded conifers
+    [1,3,2,1,'#14300c'],[0,4,4,2,'#14300c'],[0,6,5,2,'#0a2008'],[1,8,2,3,P.trunkD],
+    [7,1,2,1,'#14300c'],[6,2,4,2,'#14300c'],[5,4,6,2,'#0a2008'],[5,7,7,2,'#0a2008'],[7,9,2,2,P.trunkD],
+  ],
+  [ // Kangas: sun over a lone scots pine on dune sand
+    [8,0,4,3,'#ffdd66'],
+    [0,9,12,3,'#d8b878'],
+    [2,4,2,1,P.scots],[1,5,4,2,P.scots],[1,7,4,2,P.scotsD],[2,9,1,2,P.trunkD],
+  ],
+  [ // Vaara: snow-capped peak
+    [4,1,4,1,'#e8ecec'],[3,2,6,1,'#e8ecec'],
+    [2,3,8,2,P.hillL],[1,5,10,2,P.hill],[0,7,12,3,P.hillD],
+  ],
+  [ // Suo: reed tufts over bog water
+    [1,4,1,3,P.grassD],[3,3,1,4,P.grassD],[5,4,1,3,P.grassD],[8,3,1,4,P.grassD],[10,4,1,3,P.grassD],
+    [0,7,12,1,P.waterL],[0,8,12,3,P.water],
+  ],
+  [ // Kuusikko: tall dark spruce
+    [5,0,2,1,P.sprL],[4,1,4,2,P.sprM],[4,3,4,2,P.sprM],[3,5,6,2,P.spr],[3,7,6,2,P.spr],
+    [5,9,2,2,P.trunkD],
+  ],
+  [ // Koivikko: birch with pale speckled bark
+    [3,1,6,1,P.leafL],[2,2,8,2,P.leafL],[2,4,8,2,P.leaf],
+    [5,6,2,5,'#e8e0c8'],[5,7,1,1,'#3a3020'],[6,9,1,1,'#3a3020'],
+  ],
+  [ // Erämaa: sunset ridge over water, a tree on the shore
+    [7,0,3,2,'#ffb060'],
+    [3,2,6,2,'#c86838'],[2,4,8,2,'#a85028'],
+    [1,6,1,2,P.shrub],
+    [0,9,12,2,P.waterL],
+  ],
+  [ // Utumaa: faint tree behind rolling fog bands
+    [4,2,4,2,'#3a4818'],[3,4,6,2,'#2a3810'],[5,6,2,3,'#3a2810'],
+    [0,3,12,1,'#e8ecf0'],[0,6,12,1,'#e8ecf0'],[0,9,12,1,'#e8ecf0'],
+  ],
+];
 // speaker glyph filling most of the 12x12 icon, with either sound-wave bars
 // (on) or a bold diagonal mute slash across the whole glyph (off) — a slash
 // reads at HUD-icon size where a cramped X wouldn't. Reflects the *actual*
@@ -2848,6 +2934,65 @@ function renderMinimap(){
   mmCtx.beginPath();mmCtx.arc(char.x/WW*mw,char.y/WH*mh,3.5,0,Math.PI*2);mmCtx.fill();mmCtx.stroke();
 }
 
+// ── Map previews (map-select menu) ─────────────────────────────
+// A mini-map-style render of an *unloaded* map, built by running the same
+// terrain/path generator against that map's seed. Trees/mushrooms are
+// skipped (buildWorld() is never called) so this can't touch the live
+// map's state; the terrain globals are snapshotted and restored around
+// the call. Results are cached since every map's layout is deterministic.
+const mapPreviewCache={};
+function genMapPreviewData(n){
+  if(mapPreviewCache[n]) return mapPreviewCache[n];
+  const snap={WATER_DEF,RIVERS,MOUNT_DEF,TERRAIN_ZONES,PATHS,PATH_MASK};
+  generateWorld(n);
+  const village=placeVillage(mkRng(n*8123+31));
+  const data={water:WATER_DEF, rivers:RIVERS, mount:MOUNT_DEF, tz:TERRAIN_ZONES, paths:PATHS, village,
+              biome:BIOMES[(n-1)%BIOMES.length]};
+  ({WATER_DEF,RIVERS,MOUNT_DEF,TERRAIN_ZONES,PATHS,PATH_MASK}=snap);
+  mapPreviewCache[n]=data;
+  return data;
+}
+function drawMapPreview(cv,d){
+  const mw=cv.width,mh=cv.height, pctx=cv.getContext('2d');
+  pctx.fillStyle=P.mm_g; pctx.fillRect(0,0,mw,mh);
+  const tzCol={[T_SAND]:'#c8a84a',[T_MARSH]:'#3a5820',[T_ROCK]:'#787060',[T_GRAVEL]:'#8a7850'};
+  d.tz.forEach(z=>{
+    pctx.fillStyle=tzCol[z.t];
+    pctx.beginPath();pctx.ellipse(z.x*mw,z.y*mh,z.rx*mw,z.ry*mh,0,0,Math.PI*2);pctx.fill();
+  });
+  d.rivers.forEach(rv=>{
+    pctx.strokeStyle=P.mm_w;pctx.lineWidth=1.2;
+    pctx.beginPath();
+    rv.smp.forEach((p,i)=>{ if(i%4&&i!==rv.smp.length-1) return; i===0?pctx.moveTo(p.x*mw,p.y*mh):pctx.lineTo(p.x*mw,p.y*mh); });
+    pctx.stroke();
+  });
+  d.water.forEach(w=>{
+    pctx.fillStyle=P.mm_w;
+    pctx.beginPath();pctx.ellipse(w.x*mw,w.y*mh,w.rx*mw,w.ry*mh,0,0,Math.PI*2);pctx.fill();
+  });
+  d.mount.forEach(m=>{
+    pctx.fillStyle=P.mm_h;
+    pctx.beginPath();pctx.arc(m.x*mw,m.y*mh,m.s*Math.min(mw,mh)*.11,0,Math.PI*2);pctx.fill();
+  });
+  d.paths.forEach(p=>{
+    if(p.tier===2) return; // too fine to read at card size
+    pctx.strokeStyle=p.tier===0?'#cca868':'#a98a54';pctx.lineWidth=p.tier===0?1.4:1;
+    pctx.beginPath();
+    p.pts.forEach((pt,i)=>i===0?pctx.moveTo(pt.x*mw,pt.y*mh):pctx.lineTo(pt.x*mw,pt.y*mh));
+    pctx.stroke();
+  });
+  const vmx=d.village.x/WW*mw, vmy=d.village.y/WH*mh;
+  pctx.fillStyle='#e6483c'; pctx.strokeStyle='#3a1608'; pctx.lineWidth=1;
+  pctx.beginPath(); pctx.arc(vmx,vmy,2.6,0,Math.PI*2); pctx.fill(); pctx.stroke();
+  if(d.biome.tint){
+    pctx.globalCompositeOperation=d.biome.tint.mode;
+    pctx.globalAlpha=d.biome.tint.a;
+    pctx.fillStyle=d.biome.tint.color;
+    pctx.fillRect(0,0,mw,mh);
+    pctx.globalAlpha=1; pctx.globalCompositeOperation='source-over';
+  }
+}
+
 // ── Render ────────────────────────────────────────────────────
 function render(){
   pixCtx.clearRect(0,0,pixW,pixH);
@@ -2865,6 +3010,14 @@ function render(){
     pixCtx.fillStyle=`rgb(${s.col[0]},${s.col[1]},${s.col[2]})`;
     pixCtx.fillRect(px,py,sz,sz);
   });
+  if(BIOME.tint){
+    pixCtx.globalCompositeOperation=BIOME.tint.mode;
+    pixCtx.globalAlpha=BIOME.tint.a;
+    pixCtx.fillStyle=BIOME.tint.color;
+    pixCtx.fillRect(0,0,pixW,pixH);
+    pixCtx.globalAlpha=1;
+    pixCtx.globalCompositeOperation='source-over';
+  }
   ctx.imageSmoothingEnabled=false;
   ctx.drawImage(pixCv,0,0,VW,VH);
   renderMinimap();
@@ -3053,11 +3206,19 @@ function buildWinMenu(){
 function renderWinMenu(){
   const wrap=document.getElementById('win-menu');
   wrap.innerHTML='';
+  const pw=140, ph=Math.max(1,Math.round(pw*VH/VW));
   winMenuMaps.forEach((n,i)=>{
     const b=document.createElement('button');
     b.type='button';
     b.className='win-menu-item'+(i===winMenuSel?' sel':'');
-    b.innerHTML='Kartta '+n+(n===mapNum?' <span class="tag">(nykyinen)</span>':n>mapNum?' <span class="tag">UUSI!</span>':'');
+    const bi=BIOMES[(n-1)%BIOMES.length];
+    const tag=n===mapNum?' <span class="tag">(nykyinen)</span>':n>mapNum?' <span class="tag">UUSI!</span>':'';
+    b.innerHTML='<canvas class="map-preview"></canvas>'
+      +'<div class="title-row"><canvas class="map-icon"></canvas> Kartta '+n+' <span class="tag">'+bi.name+'</span>'+tag+'</div>'
+      +'<span class="desc">'+bi.desc+'</span>';
+    const prevCv=b.querySelector('.map-preview'); prevCv.width=pw; prevCv.height=ph;
+    drawMapPreview(prevCv, genMapPreviewData(n));
+    drawIconOnCanvas(b.querySelector('.map-icon'), MAP_ICONS[(n-1)%MAP_ICONS.length]);
     b.addEventListener('click',()=>{ winMenuSel=i; playSelectedWinMap(); });
     wrap.appendChild(b);
   });
@@ -3168,9 +3329,10 @@ function goToMap(n){
   location.search=params.toString();
 }
 window.addEventListener('resize',resize);
-document.getElementById('mapnum').textContent=mapNum;
+document.getElementById('mapname').textContent=BIOME.name;
 
 initHudIcons();
+hudIcon('ico-map', MAP_ICONS[(mapNum-1)%MAP_ICONS.length]);
 updateSoundIcon();
 document.getElementById('ico-sound').addEventListener('click',e=>{ e.stopPropagation(); toggleSound(); });
 document.getElementById('mapdisp').addEventListener('click',()=>{ if(!gameWon) openMapMenu(); });
