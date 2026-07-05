@@ -1491,6 +1491,21 @@ function ibShadEllipse(buf,W,H,cx,cy,rx,ry){
     }
   }
 }
+// 1px dark outline traced around the opaque silhouette: written on
+// transparent/shadow pixels 4-adjacent to a fully opaque pixel.
+// Two-pass (collect, then write) so the outline doesn't grow on itself.
+// Distinct from ibOutline (the huts' soft rim): this one is opaque, and
+// ignores the alpha-110 drop shadow so the shadow ellipse gets no ring.
+function ibTreeOutline(buf,W,H,rgb=[3,7,4]){
+  const mark=[];
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const p=4*(y*W+x);
+    if(buf[p+3]===255)continue;
+    if((x>0    &&buf[p-4+3]===255)||(x<W-1&&buf[p+4+3]===255)||
+       (y>0    &&buf[p-4*W+3]===255)||(y<H-1&&buf[p+4*W+3]===255))mark.push(p);
+  }
+  for(const p of mark){buf[p]=rgb[0];buf[p+1]=rgb[1];buf[p+2]=rgb[2];buf[p+3]=255;}
+}
 // Per-pixel Bayer-dithered sphere. palRGB[0]=darkest, palRGB[n-1]=brightest.
 // Light source: upper-left (-135°). Outer edge softened with dithered alpha.
 function ibSphere(buf,W,H,cx,cy,sr,palRGB){
@@ -1617,6 +1632,7 @@ function makeDecidSpr(r,variant=0){
     ibSet(buf,W,H,cx+1,cy-th+by,...CLR_TRUNK_BARK);
   }
 
+  ibTreeOutline(buf,W,H);
   c.putImageData(id,0,0);
   return {cv,ox:cx,oy:cy};
 }
@@ -1653,6 +1669,7 @@ function makePineSpr(r,variant=0){
   });
   const t2=tiers[2];
   ibSphere(buf,W,H,cx,(t2.baseY-t2.R-2)|0,Math.max(3,(r*.11)|0),palRGB.slice(4));
+  ibTreeOutline(buf,W,H);
   c.putImageData(id,0,0);
   return {cv,ox:cx,oy:cy};
 }
@@ -1689,6 +1706,7 @@ function makeSpruSpr(r,variant=0){
   });
   const t4=tiers[4];
   for(let sk=0;sk<Math.max(3,(r*.30)|0);sk++) ibSet(buf,W,H,cx,(t4.baseY-t4.R-sk)|0,...palRGB[4]);
+  ibTreeOutline(buf,W,H);
   c.putImageData(id,0,0);
   return {cv,ox:cx,oy:cy};
 }
@@ -1721,6 +1739,7 @@ function makeFirSpr(r,variant=0){
   });
   const t2=tiers[2];
   for(let sk=0;sk<Math.max(2,(r*.42)|0);sk++) ibSet(buf,W,H,cx,(t2.baseY-t2.R-sk)|0,...palRGB[5]);
+  ibTreeOutline(buf,W,H);
   c.putImageData(id,0,0);
   return {cv,ox:cx,oy:cy};
 }
@@ -1763,6 +1782,7 @@ function makeScotsSpr(r,variant=0){
                 sr:Math.max(4,(r*(0.32+crng()*.22))|0)});
   }
   lobes.forEach(({lx,ly,sr})=>ibSphere(buf,W,H,lx,ly,sr,crownPal));
+  ibTreeOutline(buf,W,H);
   c.putImageData(id,0,0);
   return {cv,ox:cx,oy:cy};
 }
@@ -2868,12 +2888,16 @@ function drawGnome(wx,wy,t,moving){
   // Clipped to the part still above the waterline (dy is negative-up).
   // The scale s can be fractional: rounding each scaled *edge* (rather than
   // position + size) keeps neighbouring rects seamless and pixel-crisp.
+  // During the outline pass every rect grows 1 screen px and paints
+  // P.outline instead of its own colour (but never past the waterline cut).
+  let outlinePass=false;
   function sp(dx,dy,w,h,c){
     const visH=Math.min(h,(-submerge)-dy);
     if(visH<=0) return;
-    const xa=Math.round(dx*s), xb=Math.round((dx+w)*s);
-    const ya=Math.round(dy*s), yb=Math.round((dy+visH)*s);
-    pr(f>0?cx+xa:cx-xb, cy+ya+bob, xb-xa, yb-ya, c);
+    const o=outlinePass?1:0;
+    const xa=Math.round(dx*s)-o, xb=Math.round((dx+w)*s)+o;
+    const ya=Math.round(dy*s)-o, yb=Math.round((dy+visH)*s)+(visH<h?0:o);
+    pr(f>0?cx+xa:cx-xb, cy+ya+bob, xb-xa, yb-ya, outlinePass?P.outline:c);
   }
   // Head parts sway together by hd
   const hp=(dx,dy,w,h,c)=>sp(dx+hd,dy,w,h,c);
@@ -2893,6 +2917,11 @@ function drawGnome(wx,wy,t,moving){
     const sh=Math.max(1,Math.round(s)), shw=Math.round((bob<-2*s?6:8)*s);
     pr(cx-shw,cy,shw*2,sh,'#203808');
   }
+
+  // Body drawn twice: first a silhouette pass with every rect grown 1px
+  // and painted P.outline, then the real colours on top — leaving a 1px
+  // dark rim around the union silhouette (the mushrooms' outline trick).
+  const paint=()=>{
 
   // ── Wool trouser legs (from under the hem down to the boots;
   // they shorten as a foot kicks up, like a lifting knee) ──
@@ -3022,6 +3051,10 @@ function drawGnome(wx,wy,t,moving){
   hp(-1,-47+hatDy,2,3,GN.hatD);        // crease dented into the crown
   hp( 7,-46+hatDy,1,3,'#c22b20');      // a little red feather in the band
   hp( 7,-46+hatDy,1,1,'#e85548');
+
+  };
+  outlinePass=true;  paint();
+  outlinePass=false; paint();
 }
 
 // ── Vegetation ────────────────────────────────────────────────
