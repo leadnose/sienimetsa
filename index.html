@@ -1826,16 +1826,50 @@ function makeShrubSpr(r){
   return {cv,ox:cx,oy:cy};
 }
 
+// ── Cast shadow bake ──────────────────────────────────────────
+// Stamps a sun-cast shadow onto a finished sprite: every opaque pixel is
+// projected onto the ground plane through the anchor row oy, flattened
+// and sheared so the shadow points up-and-right — receding away from the
+// viewer, with the light coming from where the camera is. Drawn under
+// the sprite, so most of it hides behind the body and the rest peeks out
+// to the upper right. Same alpha-110 black as the contact ellipse, so
+// where the two overlap they merge seamlessly. Returns a replacement
+// sprite on a canvas grown right to fit (anchor offsets unchanged).
+function addCastShadow(spr,shear=.5,squash=.2){
+  const W0=spr.cv.width,H0=spr.cv.height,oy=spr.oy;
+  const W=W0+Math.ceil(oy*shear)+1,H=H0;
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const c=cv.getContext('2d');
+  const src=spr.cv.getContext('2d').getImageData(0,0,W0,H0).data;
+  const id=c.createImageData(W,H);const buf=id.data;
+  for(let y=0;y<H0;y++)for(let x=0;x<W0;x++){
+    if(src[4*(y*W0+x)+3]!==255)continue;
+    const hh=oy-y;if(hh<=0)continue;
+    const sx=x+Math.round(hh*shear),sy=oy-Math.round(hh*squash);
+    if(sx>=W||sy<0)continue;
+    const p=4*(sy*W+sx);
+    if(!buf[p+3]){buf[p]=0;buf[p+1]=0;buf[p+2]=0;buf[p+3]=110;}
+  }
+  // the sprite itself (incl. its contact ellipse) wins over the shadow
+  for(let y=0;y<H0;y++)for(let x=0;x<W0;x++){
+    const sp4=4*(y*W0+x);if(!src[sp4+3])continue;
+    const p=4*(y*W+x);
+    buf[p]=src[sp4];buf[p+1]=src[sp4+1];buf[p+2]=src[sp4+2];buf[p+3]=src[sp4+3];
+  }
+  c.putImageData(id,0,0);
+  return {...spr,cv}; // keep extra fields (huts carry chimTop and s)
+}
+
 // ── Sprite lazy cache ─────────────────────────────────────────
 function getTreeSpr(type,r,variant=0){
   const rr=Math.max(4,Math.round(r/4)*4);
   const key=type+'_'+rr+'_'+variant;
-  if(!SP[key]) SP[key]=
+  if(!SP[key]) SP[key]=addCastShadow(
     type===TR_DECIDUOUS?makeDecidSpr(rr,variant):
     type===TR_PINE     ?makePineSpr(rr,variant):
     type===TR_SPRUCE   ?makeSpruSpr(rr,variant):
     type===TR_FIR      ?makeFirSpr(rr,variant):
-                        makeScotsSpr(rr,variant);
+                        makeScotsSpr(rr,variant));
   return SP[key];
 }
 function getShrubSpr(r){
@@ -2726,7 +2760,7 @@ function getHutSpr(h,wx,wy){
   const seed=((wx*131+wy*977)|0)>>>0;
   const hasChim=h.smoke>0;
   const key='hut'+h.type+'_'+s+'_'+seed+(hasChim?'c':'');
-  if(!SP[key]) SP[key]=makeHutSpr(h.type,s,seed,hasChim);
+  if(!SP[key]) SP[key]=addCastShadow(makeHutSpr(h.type,s,seed,hasChim));
   return SP[key];
 }
 function drawHut(wx,wy,h){
@@ -2890,8 +2924,22 @@ function drawGnome(wx,wy,t,moving){
   // position + size) keeps neighbouring rects seamless and pixel-crisp.
   // During the outline pass every rect grows 1 screen px and paints
   // P.outline instead of its own colour (but never past the waterline cut).
-  let outlinePass=false;
+  // During the shadow pass each rect is instead projected onto the ground:
+  // flattened through the feet row and sheared up-and-right by its height
+  // (light from the camera, same as the baked tree shadows). The shear is
+  // applied in screen space so the shadow keeps its direction when the
+  // sprite mirrors, and bob is ignored so it stays put during hops.
+  let outlinePass=false, shadowPass=false;
   function sp(dx,dy,w,h,c){
+    if(shadowPass){
+      const ht=-dy; if(ht<=0) return;
+      const hb=Math.max(0,-(dy+h));
+      const xa=Math.round(dx*s), xb=Math.round((dx+w)*s);
+      const sx=(f>0?cx+xa:cx-xb)+Math.round(ht*s*.5);
+      const ya=cy-Math.round(ht*s*.2), yb=cy-Math.round(hb*s*.2);
+      pr(sx,ya,xb-xa,Math.max(1,yb-ya),'#203808');
+      return;
+    }
     const visH=Math.min(h,(-submerge)-dy);
     if(visH<=0) return;
     const o=outlinePass?1:0;
@@ -3053,6 +3101,7 @@ function drawGnome(wx,wy,t,moving){
   hp( 7,-46+hatDy,1,1,'#e85548');
 
   };
+  if(wd<=0){ shadowPass=true; paint(); shadowPass=false; } // no shadow wading
   outlinePass=true;  paint();
   outlinePass=false; paint();
 }
