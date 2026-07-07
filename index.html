@@ -844,7 +844,7 @@ let collected=0, gameWon=false, gameTime=0;
 let readyToReturn=false, returningTriggered=false;
 let PICK_SPARKS=[];
 const SPARK_PAL=[[200,22,22],[218,170,20],[255,240,170],[255,255,255]];
-const SPEED=220, CHAR_R=14, PICK_R=38, PICK_ANIM_DUR=0.40;
+const SPEED=250, CHAR_R=14, PICK_R=38, PICK_ANIM_DUR=0.40;
 // Hunger: fullness drains from 1 to 0 over FULL_DRAIN_T seconds of play.
 // Below HUNGRY_AT the gnome is hungry and slows to HUNGRY_SPEED of normal;
 // walking over a berry bush (bilberry/lingonberry) eats it — the berries
@@ -3449,14 +3449,13 @@ function update(dt){
   gameTime+=dt;
   const {dx,dy}=inputDir();
   if(dx!==0) char.facing=dx>0?1:-1;
-  // Trails are quicker going: main > side > faint > off-trail. Mountain
-  // slopes and pond wading are slow going regardless of trail.
-  const pc=pathCodeAt(char.x,char.y);
+  // Mountain slopes and pond wading are slow going; everywhere else is
+  // one flat walking pace, trail or not.
   const wd=waterDepthAt(char.x,char.y);
   // walking burns energy WALK_DRAIN× faster than standing still
   fullness=Math.max(0,fullness-dt/FULL_DRAIN_T*((dx||dy)?WALK_DRAIN:1));
   const hungryMul=fullness<HUNGRY_AT?HUNGRY_SPEED:1;
-  const spd=SPEED*hungryMul*(wd>0?0.62-0.22*wd:onMountainAt(char.x,char.y)?0.45:pc===3?1.5:pc===2?1.3:pc===1?1.12:1);
+  const spd=SPEED*hungryMul*(wd>0?0.62-0.22*wd:onMountainAt(char.x,char.y)?0.45:1.12);
   // Dilly-dally amble: he strolls rather than beelines — a gentle
   // side-to-side weave plus a slight lilt in pace, layered on top of the
   // steered direction. The weave never bends his heading more than ~14°,
