@@ -1480,8 +1480,12 @@ function confetti(){
 }
 
 // ── Pixel helpers ─────────────────────────────────────────────
-function wpx(wx){ return (wx-cam.x)/PS|0; }
-function wpy(wy){ return (wy-cam.y)/PS|0; }
+// World → pix-canvas coords, with the camera snapped to whole big-pixels
+// (same snap as drawGround's cpx/cpy). Snapping sprite and ground to the
+// same grid keeps sprites from jittering ±1px against the terrain; the
+// leftover sub-pixel camera fraction is applied at blit time in render().
+function wpx(wx){ return (wx/PS|0)-(cam.x/PS|0); }
+function wpy(wy){ return (wy/PS|0)-(cam.y/PS|0); }
 function pr(x,y,w,h,c){
   if(w<=0||h<=0||x>=pixW||y>=pixH||x+w<=0||y+h<=0) return;
   pixCtx.fillStyle=c; pixCtx.fillRect(x,y,w,h);
@@ -1965,8 +1969,9 @@ function drawGround(){
   const id=pixCtx.createImageData(pixW,pixH);
   const buf=id.data;
   const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
-  // Precompute for zone lookup in normalized world coords
-  const wxBase=cam.x/WW, wyBase=cam.y/WH;
+  // Precompute for zone lookup in normalized world coords (snapped cam,
+  // so zone edges land on the same pixels as everything else)
+  const wxBase=cpx*PS/WW, wyBase=cpy*PS/WH;
   const wxStep=PS/WW,    wyStep=PS/WH;
 
   // indexed by T_GRASS / T_SAND / T_MARSH / T_ROCK / T_GRAVEL
@@ -3422,7 +3427,13 @@ function render(){
     pixCtx.globalCompositeOperation='source-over';
   }
   ctx.imageSmoothingEnabled=false;
-  ctx.drawImage(pixCv,0,0,VW,VH);
+  // The world above was drawn with the camera snapped to whole big-pixels;
+  // shift the upscaled result by the sub-big-pixel remainder so the scroll
+  // advances in 1-screen-px steps rather than PS-px jumps. pixW/pixH carry
+  // a +1 margin so the shifted image still covers the whole viewport, and
+  // scaling by exactly PS keeps every art pixel the same size on screen.
+  const ox=Math.round(cam.x-((cam.x/PS)|0)*PS), oy=Math.round(cam.y-((cam.y/PS)|0)*PS);
+  ctx.drawImage(pixCv,0,0,pixW,pixH,-ox,-oy,pixW*PS,pixH*PS);
   renderMinimap();
   updateVillageOverlay();
 }
@@ -3707,7 +3718,7 @@ function resize(){
   WW=VW*WORLD_SCALE; WH=VH*WORLD_SCALE;
   mmCv.width=MM_W; mmCv.height=Math.round(MM_W*VH/VW);
   PS=Math.max(1,Math.round(VW/640));
-  pixW=Math.ceil(VW/PS); pixH=Math.ceil(VH/PS);
+  pixW=Math.ceil(VW/PS)+1; pixH=Math.ceil(VH/PS)+1; // +1: margin for sub-pixel scroll shift in render()
   pixCv.width=pixW; pixCv.height=pixH;
   ctx.imageSmoothingEnabled=false;
   for(const k in SP) delete SP[k]; PICK_SPARKS=[]; // rebuild sprites for new PS
