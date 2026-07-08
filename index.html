@@ -871,6 +871,16 @@ const BEND_DUR=0.6, BEND_COOLDOWN=0.6, BEND_HIT_PAD=90;
 // timestamp says.
 let bumpTree=null;
 let bumpHut=null; // hut collider Gubbe is currently pressed against, mirrors bumpTree
+// Hut visit: walking into a cottage takes Gubbe inside for a break — an
+// interior cutscene where he eats at the table (fullness refills bite by
+// bite) and watches a telly programme starring a little red car. He steps
+// back out by himself when the show ends; Enter/tap skips to the door.
+// Each hut stores visitT so stepping out against the same wall can't
+// bounce him straight back in (and the map start inside the village gets
+// the same grace period, since visitT starts at 0).
+let hutScene=null; // {t: seconds inside, c: hut collider, f0: fullness at entry, skip}
+const HUT_SCENE_T=9, HUT_FADE=0.7, HUT_REVISIT=5, HUT_EAT_END=6;
+const CAR_LOOP_T=3.6; // one left-to-right pass of the telly car
 
 function snapCam() {
   cam.x = Math.max(0,Math.min(WW-VW, char.x-VW/2));
@@ -893,6 +903,10 @@ window.addEventListener('keydown',e=>{
     else if(e.key==='Escape'&&pickerMode){ e.preventDefault(); closeMapMenu(); }
     return;
   }
+  if(hutScene){
+    if(e.key==='Enter'||e.key===' '||e.key==='Escape'){ e.preventDefault(); hutScene.skip=true; }
+    return;
+  }
   keys[e.key]=true; unlockAudio(); if(e.key==='q'||e.key==='Q') toggleSound(); if(e.key==='m'||e.key==='M') toggleMusic(); if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
 });
 window.addEventListener('keyup',  e=>{ keys[e.key]=false; });
@@ -900,7 +914,7 @@ const joy={active:false,bx:0,by:0,dx:0,dy:0};
 const joyBase=document.getElementById('joy-base');
 const joyKnob=document.getElementById('joy-knob');
 const JR=50;
-canvas.addEventListener('touchstart',e=>{ e.preventDefault(); unlockAudio(); const t=e.changedTouches[0]; joy.active=true;joy.bx=t.clientX;joy.by=t.clientY;joy.dx=0;joy.dy=0; joyBase.style.left=t.clientX+'px';joyBase.style.top=t.clientY+'px';joyBase.style.display='block'; },{passive:false});
+canvas.addEventListener('touchstart',e=>{ e.preventDefault(); unlockAudio(); if(hutScene){ if(hutScene.t>1) hutScene.skip=true; return; } const t=e.changedTouches[0]; joy.active=true;joy.bx=t.clientX;joy.by=t.clientY;joy.dx=0;joy.dy=0; joyBase.style.left=t.clientX+'px';joyBase.style.top=t.clientY+'px';joyBase.style.display='block'; },{passive:false});
 canvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.changedTouches[0]; const dx=t.clientX-joy.bx,dy=t.clientY-joy.by; const a=Math.atan2(dy,dx),cl=Math.min(Math.hypot(dx,dy),JR)/JR; joy.dx=Math.cos(a)*cl;joy.dy=Math.sin(a)*cl; joyKnob.style.left=(50+joy.dx*JR)+'px';joyKnob.style.top=(50+joy.dy*JR)+'px'; },{passive:false});
 canvas.addEventListener('touchend', e=>{ e.preventDefault(); joy.active=false;joy.dx=0;joy.dy=0;joyBase.style.display='none'; },{passive:false});
 function inputDir() {
@@ -1079,6 +1093,8 @@ function playEat(){ beep(330,.09,.16); setTimeout(()=>beep(262,.12,.14),70); }
 // kept near the pick sounds' register since anything much lower vanishes
 // on small speakers.
 function playBump(){ beep(392,.14,.24); setTimeout(()=>beep(277,.18,.20),50); }
+function playDoor(){ beep(196,.10,.20); setTimeout(()=>beep(131,.14,.18),80); }
+function playBrum(){ beep(82,.20,.20); setTimeout(()=>beep(104,.24,.16),150); setTimeout(()=>beep(66,.30,.12),340); }
 
 // ── Footsteps ─────────────────────────────────────────────────
 // The reference sound is a hedgehog shuffling through a pile of dry
@@ -3500,6 +3516,7 @@ function drawMapPreview(cv,d){
 
 // ── Render ────────────────────────────────────────────────────
 function render(){
+  if(hutScene){ renderHutScene(); return; }
   updateGroundCache();
   pixCtx.drawImage(gndCv,0,0); // opaque, covers the whole canvas
   drawRiverDots();
@@ -3553,6 +3570,7 @@ function updateVillageOverlay(){
 // ── Update ────────────────────────────────────────────────────
 function update(dt){
   if(gameWon) return;
+  if(hutScene){ updateHutScene(dt); return; }
   gameTime+=dt;
   const {dx,dy}=inputDir();
   if(dx!==0) char.facing=dx>0?1:-1;
@@ -3630,6 +3648,15 @@ function update(dt){
     // *different* wall than last frame).
     const hb=hutAt(nx,ny);
     if(hb){
+      // Walking into a cottage steps inside for a snack-and-telly break —
+      // unless he's mid-victory-return, or he just came out and the
+      // revisit cooldown is still running (then the wall stays solid and
+      // thonks as before).
+      if(!returningTriggered && gameTime-(hb.h.visitT||0)>HUT_REVISIT){
+        enterHutScene(hb);
+        bumpHut=null;
+        return;
+      }
       const since=gameTime-(hb.h.bumpSndT||0);
       if(since>BEND_COOLDOWN||(bumpHut!==hb.h&&since>0.15)){
         hb.h.bumpSndT=gameTime;
@@ -3703,6 +3730,199 @@ function updateHungerHud(){
     c.fillRect(1,1,fw,cv.height-2);
   }
   document.getElementById('hud').classList.toggle('hungry',fullness<HUNGRY_AT);
+}
+
+// ── Hut visit: eat & watch the red-car show ──────────────────
+function enterHutScene(c){
+  hutScene={t:0,c,f0:fullness,skip:false};
+  c.h.visitT=gameTime;
+  joy.active=false; joy.dx=0; joy.dy=0; joyBase.style.display='none';
+  playDoor();
+  // the programme is already running when he sits down
+  setTimeout(()=>{ if(hutScene) playBrum(); },600);
+}
+function exitHutScene(){
+  const c=hutScene.c, cx=c.fx*WW, cy=c.fy*WH;
+  // step back out through the door: nudge him clear of the collider so a
+  // still-held movement key can't shove him straight back inside
+  const dx=char.x-cx, dy=char.y-cy, d=Math.hypot(dx,dy)||1;
+  const rr=Math.max(c.frx*WW,c.fry*WH)+CHAR_R+10;
+  char.x=clamp(cx+dx/d*rr,CHAR_R,WW-CHAR_R);
+  char.y=clamp(cy+dy/d*rr,CHAR_R,WH-CHAR_R);
+  c.h.visitT=gameTime;
+  hutScene=null;
+  playDoor();
+}
+function updateHutScene(dt){
+  const sc=hutScene;
+  sc.t+=dt; gameTime+=dt;
+  if(sc.t<HUT_EAT_END){
+    // steady bites: fullness climbs to full over the meal, munching audibly
+    fullness=Math.min(1,sc.f0+(1-sc.f0)*(sc.t/HUT_EAT_END));
+    if(((sc.t/1.1)|0)>(((sc.t-dt)/1.1)|0)) playEat();
+  } else fullness=1;
+  updateHungerHud();
+  // engine note each time the telly car starts another pass
+  if(sc.t%CAR_LOOP_T<(sc.t-dt)%CAR_LOOP_T) playBrum();
+  // skipping fast-forwards to the door fade rather than cutting hard
+  if(sc.skip){ sc.skip=false; sc.t=Math.max(sc.t,HUT_SCENE_T-HUT_FADE); }
+  if(sc.t>=HUT_SCENE_T) exitHutScene();
+}
+// The whole interior is drawn into the same low-res pixel canvas as the
+// forest, so the cutscene keeps the exact same chunky-pixel look.
+function renderHutScene(){
+  const t=hutScene.t, W=pixW, H=pixH, c=pixCtx;
+  const g=Math.max(2,Math.round(H/110)); // interior pixel unit
+  const floorY=(H*0.70)|0;
+  // stacked log walls with dark seams, laid course by course from the floor
+  const logH=Math.max(4,(H*0.055)|0);
+  for(let y=floorY-logH,i=0;y>-logH;y-=logH,i++){
+    c.fillStyle=i%2?'#6b4a24':'#775430'; c.fillRect(0,y,W,logH);
+    c.fillStyle='#3e2a12'; c.fillRect(0,y+logH-1,W,1);
+  }
+  // plank floor
+  c.fillStyle='#4a3418'; c.fillRect(0,floorY,W,H-floorY);
+  c.fillStyle='#33220e';
+  const plank=Math.max(5,(H*0.05)|0);
+  for(let y=floorY;y<H;y+=plank) c.fillRect(0,y,W,1);
+  // striped rag rug under the sitting corner
+  const rugX=(W*0.10)|0, rugW=(W*0.42)|0;
+  const rugY=floorY+(((H-floorY)*0.35)|0), rugH=((H-floorY)*0.45)|0;
+  const rugC=['#8a3a2a','#c8a03c','#4a6a8a','#c8a03c','#8a3a2a'];
+  for(let i=0;i<5;i++){
+    c.fillStyle=rugC[i];
+    c.fillRect(rugX,rugY+((rugH*i/5)|0),rugW,Math.max(1,(rugH/5)|0));
+  }
+  // ── telly on a cabinet, rabbit ears on top ──
+  const sw=Math.max(70,(W*0.30)|0), sh=(sw*0.62)|0;
+  const scx=(W*0.71)|0, tvB=(H*0.80)|0;
+  const sx=scx-(sw>>1), sy=tvB-sh;
+  const cabW=sw+g*6, cabH=Math.max(6,(H*0.06)|0);
+  c.fillStyle=P.outline; c.fillRect(scx-(cabW>>1)-1,tvB+g-1,cabW+2,cabH+2);
+  c.fillStyle='#2e1c0c'; c.fillRect(scx-(cabW>>1),tvB+g,cabW,cabH);
+  c.fillStyle='#553a1c'; c.fillRect(scx-(cabW>>1),tvB+g,cabW,2);
+  c.fillStyle=P.outline; c.fillRect(sx-g-1,sy-g-1,sw+2*g+2,sh+2*g+2);
+  c.fillStyle='#4a4038'; c.fillRect(sx-g,sy-g,sw+2*g,sh+2*g);
+  c.fillStyle='#222222';
+  for(let k=0;k<g*5;k++){ c.fillRect(scx-2-k,sy-g-2-k,1,1); c.fillRect(scx+2+k,sy-g-2-k,1,1); }
+  // ── the programme: a red car crossing a summer landscape ──
+  c.save(); c.beginPath(); c.rect(sx,sy,sw,sh); c.clip();
+  const hz=sy+((sh*0.50)|0), roadY=sy+((sh*0.64)|0), roadH=Math.max(4,(sh*0.26)|0);
+  c.fillStyle='#8ecae6'; c.fillRect(sx,sy,sw,sh);                 // sky
+  c.fillStyle='#ffd94a'; c.fillRect(sx+sw-g*4,sy+g*2,g*2,g*2);    // sun
+  c.fillStyle='#ffffff';                                          // drifting clouds
+  const cl=(t*3)%(sw+30), cl2=(t*2+sw*0.6)%(sw+30);
+  c.fillRect(sx+sw-cl,sy+g*3,g*5,g); c.fillRect(sx+sw-cl+g,sy+g*2,g*3,g);
+  c.fillRect(sx+sw-cl2,sy+g*6,g*4,g);
+  c.fillStyle='#63a83e'; c.fillRect(sx,hz,sw,sh);                 // meadow
+  c.fillStyle='#3e7a28';                                          // roadside bushes
+  for(let x=sx+((sw*0.15)|0);x<sx+sw;x+=(sw*0.3)|0) c.fillRect(x,roadY-g*2,g*4,g*2);
+  c.fillStyle='#5a5a5a'; c.fillRect(sx,roadY,sw,roadH);           // road
+  c.fillStyle='#8a8a8a'; c.fillRect(sx,roadY,sw,1); c.fillRect(sx,roadY+roadH-1,sw,1);
+  c.fillStyle='#e8e8d0';                                          // centre dashes
+  const dash=Math.max(3,(sw/14)|0);
+  for(let x=sx;x<sx+sw;x+=dash*2) c.fillRect(x,roadY+(roadH>>1),dash,Math.max(1,g>>1));
+  // the star of the show
+  const cw=Math.max(14,(sw*0.30)|0), ch2=Math.max(5,(cw*0.30)|0);
+  const carX=(sx-cw+(sw+2*cw)*((t%CAR_LOOP_T)/CAR_LOOP_T))|0;
+  const wr=Math.max(2,(cw*0.11)|0);
+  const carB=roadY+roadH-Math.max(1,g>>1)-wr;                     // wheel centres
+  const bob=((t*9)|0)%2;                                          // engine judder
+  const bodyY=carB-wr-ch2-bob;
+  for(let i=0;i<3;i++){                                           // exhaust puffs
+    c.fillStyle='rgba(200,200,200,'+(0.4-i*0.12)+')';
+    c.fillRect(carX-3-i*g*2-(((t*20)|0)%3),bodyY+ch2-2-i,g,g);
+  }
+  c.fillStyle=P.outline;
+  c.fillRect(carX-1,bodyY-1,cw+2,ch2+wr+2);
+  c.fillRect(carX+((cw*0.16)|0)-1,bodyY-ch2-1,((cw*0.52)|0)+2,ch2+2);
+  c.fillStyle='#d42a1c';
+  c.fillRect(carX,bodyY,cw,ch2+wr);                               // body
+  c.fillRect(carX+((cw*0.16)|0),bodyY-ch2,(cw*0.52)|0,ch2);       // cabin
+  c.fillStyle='#f2604a'; c.fillRect(carX,bodyY,cw,Math.max(1,g>>1)); // sheen
+  c.fillStyle='#8e1408'; c.fillRect(carX,bodyY+ch2+wr-1,cw,1);
+  c.fillStyle='#bfe6f5';                                          // windows
+  c.fillRect(carX+((cw*0.20)|0),bodyY-ch2+1,(cw*0.20)|0,ch2-2);
+  c.fillRect(carX+((cw*0.44)|0),bodyY-ch2+1,(cw*0.20)|0,ch2-2);
+  c.fillStyle='#ffe98a'; c.fillRect(carX+cw-2,bodyY+2,2,2);       // headlight
+  pixCircle(carX+((cw*0.22)|0),carB,wr,'#141414');
+  pixCircle(carX+((cw*0.78)|0),carB,wr,'#141414');
+  c.fillStyle='#9a9a9a';
+  c.fillRect(carX+((cw*0.22)|0),carB,1,1); c.fillRect(carX+((cw*0.78)|0),carB,1,1);
+  c.restore();
+  c.fillStyle='rgba(255,255,255,0.12)'; c.fillRect(sx+1,sy+1,sw-2,2); // CRT gloss
+  // ── table with the evening meal ──
+  const gx=(W*0.24)|0, gy=(H*0.88)|0;              // where Gubbe sits
+  const tbX=gx+g*8, tbW=g*14, tbY=(H*0.795)|0;
+  c.fillStyle=P.outline; c.fillRect(tbX-1,tbY-1,tbW+2,g*2+2);
+  c.fillStyle='#8a5c28'; c.fillRect(tbX,tbY,tbW,g*2);
+  c.fillStyle='#a87438'; c.fillRect(tbX,tbY,tbW,1);
+  c.fillStyle='#5a3a16';
+  c.fillRect(tbX+g,tbY+g*2,g,gy-tbY-g*2); c.fillRect(tbX+tbW-g*2,tbY+g*2,g,gy-tbY-g*2);
+  // plate of mushrooms and berries — the helping shrinks as he eats
+  const left=Math.max(0,1-t/HUT_EAT_END);
+  c.fillStyle='#e8dcc0'; c.fillRect(tbX+g*2,tbY-g,g*6,g);
+  if(left>0){
+    c.fillStyle='#a5682a'; c.fillRect(tbX+g*3,tbY-g*2,Math.max(1,(g*3*left)|0),g);
+    c.fillStyle='#4a3a8a'; c.fillRect(tbX+g*3,tbY-g*3+1,Math.max(1,(g*2*left)|0),g-1);
+  }
+  c.fillStyle=P.outline; c.fillRect(tbX+g*10-1,tbY-g*3-1,g*2+2,g*3+1); // mug
+  c.fillStyle='#c8281c'; c.fillRect(tbX+g*10,tbY-g*3,g*2,g*3);
+  c.fillStyle='rgba(232,232,232,0.5)';
+  c.fillRect(tbX+g*10+((Math.sin(t*2)*g)|0),tbY-g*5,1,g);         // steam wisp
+  // ── Gubbe on his stool, profile view, facing the telly ──
+  const seatY=gy-g*6;
+  c.fillStyle=P.outline; c.fillRect(gx-g*4-1,seatY-1,g*7+2,g+2);
+  c.fillStyle='#5a3a16'; c.fillRect(gx-g*4,seatY,g*7,g);
+  c.fillRect(gx-g*3,seatY+g,g,gy-seatY-g); c.fillRect(gx+g,seatY+g,g,gy-seatY-g);
+  c.fillStyle=GN.pant;                                            // seated legs
+  c.fillRect(gx-g,seatY-g*2,g*4,g*2); c.fillRect(gx+g*2,seatY-g,g*2,g*4);
+  c.fillStyle=GN.boot; c.fillRect(gx+g*2,gy-g,g*4,g);             // pointy shoes
+  c.fillStyle=GN.bootL; c.fillRect(gx+g*5,gy-g,g,1);
+  const bodyT=seatY-g*8;                                          // tunic belly
+  c.fillStyle=P.outline; c.fillRect(gx-g*3-1,bodyT-1,g*6+2,g*6+2);
+  c.fillStyle=GN.tunic; c.fillRect(gx-g*3,bodyT,g*6,g*6);
+  c.fillStyle=GN.tunicL; c.fillRect(gx-g*3,bodyT,g,g*6);
+  c.fillStyle=GN.tunicD; c.fillRect(gx+g*2,bodyT,g,g*6);
+  c.fillStyle=GN.belt; c.fillRect(gx-g*3,seatY-g*3,g*6,g);
+  const hdY=bodyT-g*5;                                            // head
+  c.fillStyle=P.outline; c.fillRect(gx-g*2-1,hdY-1,g*4+2,g*5+2);
+  c.fillStyle=GN.skin; c.fillRect(gx-g*2,hdY,g*4,g*4);
+  c.fillStyle=GN.eye;  c.fillRect(gx+g,hdY+g,(g>>1)||1,(g>>1)||1);
+  c.fillStyle=GN.nose; c.fillRect(gx+g*2,hdY+g,g,g);
+  c.fillStyle=GN.cheek; c.fillRect(gx+g,hdY+g*2,g,(g>>1)||1);
+  c.fillStyle=GN.beard; c.fillRect(gx-g*2,hdY+g*3,g*4,g*2);
+  c.fillStyle=GN.beardL; c.fillRect(gx-g*2,hdY+g*3,g*4,1);
+  c.fillStyle=P.outline; c.fillRect(gx-g*3-1,hdY-g-1,g*7+2,g+2);  // felt hat
+  c.fillStyle=GN.hat; c.fillRect(gx-g*3,hdY-g,g*7,g);
+  c.fillStyle=GN.hatL; c.fillRect(gx-g*2,hdY-g*2,g*4,g);
+  c.fillStyle=GN.hatD; c.fillRect(gx-g,hdY-g*3,g*2,g);
+  // munching arm: hand swings plate → mouth while the meal lasts
+  const m=t<HUT_EAT_END?0.5-0.5*Math.cos(t*5):0;
+  const shX=gx+g*2, shY=bodyT+g;
+  const hx=tbX+g*4+(gx+g*3-(tbX+g*4))*m, hy=tbY-g*2+(hdY+g*3-(tbY-g*2))*m;
+  c.fillStyle=GN.tunic;
+  for(let i=1;i<=4;i++){
+    const ax=(shX+(hx-shX)*i/4)|0, ay=(shY+(hy-shY)*i/4)|0;
+    c.fillRect(ax-(g>>1),ay-(g>>1),g,g);
+  }
+  c.fillStyle=GN.skin; c.fillRect((hx-(g>>1))|0,(hy-(g>>1))|0,g,g);
+  if(m<0.5&&t<HUT_EAT_END){ c.fillStyle='#4a3a8a'; c.fillRect(hx|0,(hy-g)|0,(g>>1)||1,(g>>1)||1); }
+  // dim cabin light plus the telly's cool flicker washing over the room
+  c.fillStyle='rgba(24,16,40,0.18)'; c.fillRect(0,0,W,H);
+  const fl=Math.max(0,0.05+0.035*Math.sin(t*13)+0.025*Math.sin(t*31));
+  c.fillStyle='rgba(150,190,255,'+fl.toFixed(3)+')'; c.fillRect(0,0,W,H);
+  // caption bar
+  c.fillStyle='rgba(16,12,4,0.6)'; c.fillRect(0,H-24,W,24);
+  c.font='8px "PS2P",monospace'; c.textAlign='center';
+  c.fillStyle='#ffe9b0'; c.fillText('Nam nam... brum brum!',W>>1,H-14);
+  c.fillStyle='rgba(255,233,176,0.6)'; c.fillText('Enter / kosketa: takaisin metsään',W>>1,H-4);
+  c.textAlign='start';
+  // upscale, plus the door "fade" at both ends of the visit
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(pixCv,0,0,pixW,pixH,0,0,pixW*PS,pixH*PS);
+  const fade=Math.max(0,Math.min(1,t/HUT_FADE,(HUT_SCENE_T-t)/HUT_FADE));
+  if(fade<1){ ctx.fillStyle='rgba(0,0,0,'+(1-fade).toFixed(3)+')'; ctx.fillRect(0,0,VW,VH); }
 }
 
 // ── Win ───────────────────────────────────────────────────────
@@ -3820,6 +4040,7 @@ function resize(){
   gndValid=false; // world & sizes change below — rebuild the ground cache
   ctx.imageSmoothingEnabled=false;
   for(const k in SP) delete SP[k]; PICK_SPARKS=[]; // rebuild sprites for new PS
+  hutScene=null; // the scene holds a collider from the pre-resize world
   setTreeSize();
   buildWorld();
   if(cs) MUSHROOMS.forEach((m,i)=>m.collected=Boolean(cs[i]));
@@ -3833,6 +4054,11 @@ function resize(){
 function startGame(){
   collected=0; gameWon=false; gameTime=0; PICK_SPARKS=[];
   readyToReturn=false; returningTriggered=false;
+  // visitT=0 (not undefined) doubles as the spawn grace period: he starts
+  // inside the village ring, so give him HUT_REVISIT seconds to walk clear
+  // before a brushed wall counts as "going in"
+  hutScene=null;
+  if(VILLAGE) VILLAGE.huts.forEach(h=>h.visitT=0);
   document.getElementById('homearrow').classList.remove('show');
   fullness=1; lastHungerPct=-1; UNDERSTORY.forEach(u=>u.eaten=false);
   bilEaten=0; lingEaten=0;
