@@ -1966,46 +1966,81 @@ function getShrubSpr(r){
 // Stones: 1% of pixels tinted grey-brown (AoE2 ground texture feel).
 // Patches: drawn with dithered edges into same ImageData buffer.
 //
-// Ground, patches, flowers and paths are static in world space and every
-// pixel is a pure function of its world coordinate, so the whole pass is
-// cached in a screen-sized canvas anchored to the snapped camera
-// (gndX/gndY, in world big-pixels). Scrolling shifts the still-valid
-// region and software-renders only the newly exposed edge strips, so the
-// full-viewport per-pixel pass (which used to eat the whole frame budget
-// every frame) only runs when the cache is rebuilt from scratch
-// (resize / world rebuild / camera teleport).
+// Ground, patches, flowers, paths, rivers and lakes are all cached in a
+// screen-sized canvas anchored to the snapped camera (gndX/gndY, in
+// world big-pixels): every cached pixel is a pure function of its world
+// coordinate plus gndTick, the 2Hz wave-stripe tick. Scrolling shifts
+// the still-valid region and software-renders only the newly exposed
+// edge strips; when the tick advances, only the lake regions (the sole
+// tick-dependent pixels) re-render. The full-viewport per-pixel pass
+// (which used to eat the whole frame budget every frame) only runs when
+// the cache is rebuilt from scratch (resize / world rebuild / camera
+// teleport). Sparkle that moves faster than the tick — river flow dots,
+// wave highlight dashes, glints — is drawn per-frame on top in render().
 const gndCv=document.createElement('canvas'), gndCtx=gndCv.getContext('2d');
 const gndAux=document.createElement('canvas'), gndAuxCtx=gndAux.getContext('2d');
-let gndX=0, gndY=0, gndValid=false;
+let gndX=0, gndY=0, gndTick=0, gndValid=false;
 
 function updateGroundCache(){
   const nx=(cam.x/PS)|0, ny=(cam.y/PS)|0;
+  const tick=Math.floor(gameTime*2);
   const dx=nx-gndX, dy=ny-gndY;
-  if(gndValid && !dx && !dy) return;
+  if(gndValid && !dx && !dy && tick===gndTick) return;
   gndX=nx; gndY=ny;
   if(!gndValid || Math.abs(dx)>=pixW || Math.abs(dy)>=pixH){
+    gndTick=tick;
     renderGroundRect(0,0,pixW,pixH);
     gndValid=true;
     return;
   }
-  // Shift the overlapping region through the aux canvas (self-drawImage
-  // with overlapping source/dest is unreliable), then render the exposed
-  // L-shape: a full-height vertical strip plus a full-width horizontal
-  // strip on the leading edges. Their small corner overlap is rendered
-  // twice — harmless, every pixel is deterministic in world coords.
-  gndAuxCtx.drawImage(gndCv,-dx,-dy);
-  gndCtx.drawImage(gndAux,0,0);
-  if(dx>0) renderGroundRect(pixW-dx,0,dx,pixH);
-  else if(dx<0) renderGroundRect(0,0,-dx,pixH);
-  if(dy>0) renderGroundRect(0,pixH-dy,pixW,dy);
-  else if(dy<0) renderGroundRect(0,0,pixW,-dy);
+  if(dx||dy){
+    // Shift the overlapping region through the aux canvas (self-drawImage
+    // with overlapping source/dest is unreliable), then render the exposed
+    // L-shape: a full-height vertical strip plus a full-width horizontal
+    // strip on the leading edges. Their small corner overlap is rendered
+    // twice — harmless, every pixel is deterministic in world coords.
+    gndAuxCtx.drawImage(gndCv,-dx,-dy);
+    gndCtx.drawImage(gndAux,0,0);
+    if(dx>0) renderGroundRect(pixW-dx,0,dx,pixH);
+    else if(dx<0) renderGroundRect(0,0,-dx,pixH);
+    if(dy>0) renderGroundRect(0,pixH-dy,pixW,dy);
+    else if(dy<0) renderGroundRect(0,0,pixW,-dy);
+  }
+  if(tick!==gndTick){
+    gndTick=tick;
+    // Only lake regions depend on the tick (wave stripes, plus the river
+    // mouth stripe blend, which lives inside lr<1.55 lake radii) — pad
+    // each visible lake's bbox to 1.6× and re-render just those rects.
+    for(const w of WATER_DEF){
+      const cx=(w.x*WW/PS|0)-gndX, cy=(w.y*WH/PS|0)-gndY;
+      const rx=Math.max(3,(w.rx*WW/PS)|0), ry=Math.max(3,(w.ry*WH/PS)|0);
+      const wobMax=1+w.wob.reduce((s,h)=>s+h.a,0);
+      const mrx=Math.ceil(rx*wobMax*1.6)+6, mry=Math.ceil(ry*wobMax*1.6)+6;
+      const bx0=Math.max(0,cx-mrx), bx1=Math.min(pixW,cx+mrx+1);
+      const by0=Math.max(0,cy-mry), by1=Math.min(pixH,cy+mry+1);
+      // waterOnly: ground/paths in the cache are still valid — read the
+      // rect back and re-run just the river+lake passes over it
+      if(bx0<bx1&&by0<by1) renderGroundRect(bx0,by0,bx1-bx0,by1-by0,true);
+    }
+  }
 }
 
-// Render ground+patches+flowers+paths for the cache rect [rx0,rx0+rw)×
-// [ry0,ry0+rh); cache pixel (px,py) is world big-pixel (gndX+px,gndY+py).
-function renderGroundRect(rx0,ry0,rw,rh){
-  const id=gndCtx.createImageData(rw,rh);
+// Render ground+patches+flowers+paths+rivers+lakes for the cache rect
+// [rx0,rx0+rw)×[ry0,ry0+rh); cache pixel (px,py) is world big-pixel
+// (gndX+px,gndY+py). With waterOnly the land layers are kept from the
+// existing cache and only the water passes re-run (for tick changes).
+function renderGroundRect(rx0,ry0,rw,rh,waterOnly){
+  const id=waterOnly?gndCtx.getImageData(rx0,ry0,rw,rh):gndCtx.createImageData(rw,rh);
   const buf=id.data;
+  if(waterOnly){
+    const npx=rw*rh;
+    if(!RIV_OFF||RIV_OFF.length<npx) RIV_OFF=new Float32Array(npx);
+    RIV_OFF.fill(1e9,0,npx);
+    stampRiversRect(buf,rx0,ry0,rw,rh);
+    WATER_DEF.forEach((w,wi)=>stampWaterRect(buf,rx0,ry0,rw,rh,w,wi));
+    gndCtx.putImageData(id,rx0,ry0);
+    return;
+  }
   // Zone lookup uses normalized world coords derived from the integer
   // world pixel, so a pixel renders identically whichever strip it's in
   const wxStep=PS/WW, wyStep=PS/WH;
@@ -2124,6 +2159,15 @@ function renderGroundRect(rx0,ry0,rw,rh){
     }
   }
 
+  // Rivers and lakes are part of the cached layer: RIV_OFF (rect-local
+  // here) carries the river shore-distance field from the river pass into
+  // the lake pass for the confluence blend, exactly as before.
+  const npx=rw*rh;
+  if(!RIV_OFF||RIV_OFF.length<npx) RIV_OFF=new Float32Array(npx);
+  RIV_OFF.fill(1e9,0,npx);
+  stampRiversRect(buf,rx0,ry0,rw,rh);
+  WATER_DEF.forEach((w,wi)=>stampWaterRect(buf,rx0,ry0,rw,rh,w,wi));
+
   gndCtx.putImageData(id,rx0,ry0);
 }
 
@@ -2186,15 +2230,13 @@ function stampPath(buf,rx0,ry0,rw,rh,x0,y0,x1,y1,cfg,fade){
 // segment's water; here overlapping stretches min-combine their offsets
 // in RIV_OFF, so joints and hairpin bends stay seamless.
 let RIV_OFF=null;
-function drawRivers(){
+// Stamp river water+banks into the ground-cache rect buffer (see
+// renderGroundRect for the rect/buf conventions). RIV_OFF is filled by
+// the caller and indexed rect-locally.
+function stampRiversRect(buf,rx0,ry0,rw,rh){
   if(!RIVERS.length) return;
-  const npx=pixW*pixH;
-  if(!RIV_OFF||RIV_OFF.length<npx) RIV_OFF=new Float32Array(npx);
-  RIV_OFF.fill(1e9);
-  const id=pixCtx.getImageData(0,0,pixW,pixH), buf=id.data;
-  const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
   const HW=5.5, BANK=5; // base water halfwidth / bank band width, px
-  const wtick=Math.floor(gameTime*2); // matches drawWater's wave-stripe tick
+  const wtick=gndTick; // matches the lakes' wave-stripe tick
   // Same ramps as the lakes (drawWater's wPal/shoreCols) minus the deepest
   // water step — rivers are shallow — so a river reads as the same water
   // where it meets a lake, not a differently-tinted stream. The bank band
@@ -2206,8 +2248,8 @@ function drawRivers(){
   for(const rv of RIVERS){
     const smp=rv.smp, nSeg=smp.length-1;
     for(let i=0;i<nSeg;i++){
-      const x0=wpx(smp[i].x*WW), y0=wpy(smp[i].y*WH);
-      const x1=wpx(smp[i+1].x*WW), y1=wpy(smp[i+1].y*WH);
+      const x0=(smp[i].x*WW/PS|0)-gndX,   y0=(smp[i].y*WH/PS|0)-gndY;
+      const x1=(smp[i+1].x*WW/PS|0)-gndX, y1=(smp[i+1].y*WH/PS|0)-gndY;
       const hw0=HW*smp[i].m, hw1=HW*smp[i+1].m;
       // Inside the lake the current fans out into a plume, so segments
       // near/inside the lake need extra lateral reach recorded in RIV_OFF
@@ -2219,8 +2261,8 @@ function drawRivers(){
         if(Math.hypot(ux,uy)/waterEdgeMul(w.wob,Math.atan2(uy,ux))<1.2) extra=32;
       }
       const reach=Math.max(hw0,hw1)+BANK+extra;
-      const minx=Math.max(0,(Math.min(x0,x1)-reach)|0), maxx=Math.min(pixW-1,Math.ceil(Math.max(x0,x1)+reach));
-      const miny=Math.max(0,(Math.min(y0,y1)-reach)|0), maxy=Math.min(pixH-1,Math.ceil(Math.max(y0,y1)+reach));
+      const minx=Math.max(rx0,(Math.min(x0,x1)-reach)|0), maxx=Math.min(rx0+rw-1,Math.ceil(Math.max(x0,x1)+reach));
+      const miny=Math.max(ry0,(Math.min(y0,y1)-reach)|0), maxy=Math.min(ry0+rh-1,Math.ceil(Math.max(y0,y1)+reach));
       if(minx>maxx||miny>maxy) continue;
       const dx=x1-x0, dy=y1-y0, ll=dx*dx+dy*dy||1;
       for(let py=miny;py<=maxy;py++){
@@ -2229,14 +2271,14 @@ function drawRivers(){
           const ex=px-(x0+dx*t), ey=py-(y0+dy*t), d=Math.sqrt(ex*ex+ey*ey);
           const hw=hw0+(hw1-hw0)*t, off=d-hw;
           if(off>BANK+extra) continue;
-          const bi=py*pixW+px;
+          const bi=(py-ry0)*rw+(px-rx0);
           if(off>=RIV_OFF[bi]) continue; // a nearer stretch already painted this pixel
           // Lake-normalized radius of this pixel (<1 = inside the lake) —
           // drives both the mouth colour blend and the plume fan-out.
           let lr=1e9;
           if(rv.lake){
             const w=rv.lake;
-            const ux=((px+cpx)*PS/WW-w.x)/w.rx, uy=((py+cpy)*PS/WH-w.y)/w.ry;
+            const ux=((px+gndX)*PS/WW-w.x)/w.rx, uy=((py+gndY)*PS/WH-w.y)/w.ry;
             lr=Math.hypot(ux,uy)/waterEdgeMul(w.wob,Math.atan2(uy,ux));
           }
           const inLake=lr<1;
@@ -2257,10 +2299,12 @@ function drawRivers(){
             // reads as a slightly brighter current.
             let shade=(1-d/hw)*3.2;
             const f=Math.max(0,Math.min(0.7,(1.55-lr)/0.55));
-            if(f>0) shade=shade*(1-0.88*f)+(((px-py+wtick)&7)<2?0.8*f:0);
+            // Wave stripes are world-anchored (px+gndX etc.) so the cached
+            // pixels stay valid while scrolling within one tick
+            if(f>0) shade=shade*(1-0.88*f)+(((px+gndX-py-gndY+wtick)&7)<2?0.8*f:0);
             shade=Math.min(wPal.length-1-1e-4,shade);
             const i0=Math.max(0,shade|0);
-            c=wPal[(shade-i0)*16>b4(px+cpx,py+cpy)?i0+1:i0];
+            c=wPal[(shade-i0)*16>b4(px+gndX,py+gndY)?i0+1:i0];
           } else {
             c=bankCols[Math.min(4,off|0)]; // same pick as the lake shore
           }
@@ -2270,8 +2314,10 @@ function drawRivers(){
       }
     }
   }
-  pixCtx.putImageData(id,0,0);
-  // Flow dots drifting downstream along the centreline
+}
+// Flow dots drifting downstream along the centreline — faster than the
+// cache tick, so drawn per-frame over the blitted cache
+function drawRiverDots(){
   const tick=Math.floor(gameTime*5);
   RIVERS.forEach(rv=>{
     const smp=rv.smp, n=smp.length;
@@ -2294,8 +2340,10 @@ function drawRivers(){
 // Shore: 5-ring gradient (bright sand → wet sand → silt → shallow → deep).
 // Water: depth-gradient fill + diagonal Bayer-dithered wave pattern.
 // Animated highlights as short bright dashes in upper quadrant.
-function drawWater(w,wi){
-  const cx=wpx(w.x*WW), cy=wpy(w.y*WH);
+// Stamp one lake into the ground-cache rect buffer (see renderGroundRect
+// for the rect/buf conventions; RIV_OFF must already hold the river pass)
+function stampWaterRect(buf,rx0,ry0,rw,rh,w,wi){
+  const cx=(w.x*WW/PS|0)-gndX, cy=(w.y*WH/PS|0)-gndY;
   const rx=Math.max(3,(w.rx*WW/PS)|0), ry=Math.max(3,(w.ry*WH/PS)|0);
   const SHORE=5; // widest shore band, in px, beyond the wobbly shoreline
   // Wobble can push the true shore out past the base rx/ry by its combined
@@ -2304,15 +2352,11 @@ function drawWater(w,wi){
   // just by a flat SHORE margin, or the far side of a bulge gets clipped
   // to a hard rectangular edge.
   const wobMax=1+w.wob.reduce((s,h)=>s+h.a,0);
-  // Must be integers: bx0/by0/bw/bh below derive from these, and the
-  // per-pixel fill loop indexes the ImageData buffer using bw as an
-  // integer row stride. A fractional mrx/mry made bx0 fractional, which
-  // getImageData silently truncates to integer pixels while the fill loop
-  // kept using the fractional bw as its stride — every row past the first
-  // computed a non-integer typed-array index, which silently no-ops on
-  // write, so only a 1px sliver at the top of the pond ever got painted.
+  // Must be integers: bx0/by0 below derive from these and the per-pixel
+  // fill loop turns them into integer typed-array indices — a fractional
+  // index silently no-ops on write.
   const mrx=Math.ceil(rx*wobMax), mry=Math.ceil(ry*wobMax);
-  if(cx+mrx+SHORE<0||cx-mrx-SHORE>pixW||cy+mry+SHORE<0||cy-mry-SHORE>pixH) return;
+  if(cx+mrx+SHORE<rx0||cx-mrx-SHORE>rx0+rw||cy+mry+SHORE<ry0||cy-mry-SHORE>ry0+rh) return;
 
   // Shore bands (dark silt → dry sand) and the water body are rendered
   // together in one per-pixel pass into a local ImageData region: each
@@ -2355,27 +2399,22 @@ function drawWater(w,wi){
     const i1=(i0+1)%LUT_N;
     return arr[i0]+(arr[i1]-arr[i0])*f;
   };
-  const edgeAt=(ang)=>lutSample(edgeLUT,ang);
 
   // Shore band colours, closest to farthest from the true shoreline
   const shoreCols=[[92,64,16],[122,92,24],[160,120,40],[184,144,48],[204,168,64]];
-  const tick=Math.floor(gameTime*2);
-  const cpx=(cam.x/PS)|0, cpy=(cam.y/PS)|0;
-  const bx0=Math.max(0,cx-mrx-SHORE), bx1=Math.min(pixW,cx+mrx+SHORE+1);
-  const by0=Math.max(0,cy-mry-SHORE), by1=Math.min(pixH,cy+mry+SHORE+1);
-  const bw=bx1-bx0, bh=by1-by0;
-  if(bw>0&&bh>0){
-    const wid=pixCtx.getImageData(bx0,by0,bw,bh);
-    const wb=wid.data;
+  const tick=gndTick;
+  const bx0=Math.max(rx0,cx-mrx-SHORE), bx1=Math.min(rx0+rw,cx+mrx+SHORE+1);
+  const by0=Math.max(ry0,cy-mry-SHORE), by1=Math.min(ry0+rh,cy+mry+SHORE+1);
+  if(bx0<bx1&&by0<by1){
     // Depth palette: very deep → bright surface (precomputed RGB)
     const wPal=[[10,32,60],[14,52,88],[22,78,128],[34,104,160],[52,132,190]];
     // River inflow plumes: a wide fan of brightened water around each
     // recorded river mouth, fading out radially (dm/R past 1 → no boost)
-    const mouths=(w.mouths||[]).map(mo=>({mx:wpx(mo.x*WW),my:wpy(mo.y*WH),R:mo.m*26}));
-    for(let row=0;row<bh;row++){
-      const py=by0+row, dy=py-cy, v=dy/ry;
-      for(let col=0;col<bw;col++){
-        const px=bx0+col, dx=px-cx, u=dx/rx;
+    const mouths=(w.mouths||[]).map(mo=>({mx:(mo.x*WW/PS|0)-gndX,my:(mo.y*WH/PS|0)-gndY,R:mo.m*26}));
+    for(let py=by0;py<by1;py++){
+      const dy=py-cy, v=dy/ry;
+      for(let px=bx0;px<bx1;px++){
+        const dx=px-cx, u=dx/rx;
         const r0=Math.hypot(u,v);
         const ang=Math.atan2(v,u);
         const medge=lutSample(edgeLUT,ang);
@@ -2387,7 +2426,7 @@ function drawWater(w,wi){
         // crosses the shoreline), blend them with a smooth-min: near the
         // junction the combined waterline bows outward, rounding the
         // corners, and the shared 5-colour band follows the rounded curve.
-        const roff=RIV_OFF?RIV_OFF[py*pixW+px]:1e9;
+        const roff=RIV_OFF[(py-ry0)*rw+(px-rx0)];
         // Open river channel beyond the shoreline: the river's ramp lacks
         // the lake's darkest edge colour, so a hard handoff reads as a
         // line across the water. Instead, over the channel's last ~6px,
@@ -2405,7 +2444,7 @@ function drawWater(w,wi){
           // inside; plume flanks also fade toward the cone's edge.
           let q=offPx>0?(6-offPx)/12:0.5-offPx/40;   // "pondness" of this pixel
           if(roff>0) q=Math.max(q,roff/plumeLat);
-          if(q*16<=b4(px+cpx+2,py+cpy+1)) continue;  // river pixel survives
+          if(q*16<=b4(px+gndX+2,py+gndY+1)) continue;  // river pixel survives
           if(offPx>0) mouthDither=true;              // else paint pond water here
         }
         let co=offPx;
@@ -2416,7 +2455,7 @@ function drawWater(w,wi){
         let c;
         if(offPx<=0||co<=0||mouthDither){
           const depth=1-r0/medge; // negative in the rounded notch → clamps to edge shade
-          const wave=(px-py+tick)&7;
+          const wave=(px+gndX-py-gndY+tick)&7; // world-anchored, scroll-stable
           let shade=depth*3.5+((wave<2)?0.8:0);
           for(const mo of mouths){
             const boost=2.6*(1-Math.hypot(px-mo.mx,py-mo.my)/mo.R);
@@ -2424,17 +2463,28 @@ function drawWater(w,wi){
           }
           shade=Math.max(0,Math.min(wPal.length-1-1e-4,shade));
           const i0=shade|0;
-          const pick=(shade-i0)*16>b4(px+cpx,py+cpy)?i0+1:i0;
+          const pick=(shade-i0)*16>b4(px+gndX,py+gndY)?i0+1:i0;
           c=wPal[pick];
         } else if(co<=5){
           c=shoreCols[Math.min(4,co|0)];
         } else continue;
-        const bp=4*(row*bw+col);
-        wb[bp]=c[0];wb[bp+1]=c[1];wb[bp+2]=c[2];wb[bp+3]=255;
+        const bp=4*((py-ry0)*rw+(px-rx0));
+        buf[bp]=c[0];buf[bp+1]=c[1];buf[bp+2]=c[2];buf[bp+3]=255;
       }
     }
-    pixCtx.putImageData(wid,bx0,by0);
   }
+}
+
+// Per-lake sparkle drawn per-frame over the blitted cache: highlight
+// dashes and glints animate faster than the cache tick, and all of it is
+// a handful of cheap canvas rects, not a per-pixel pass.
+function drawWaterSparkle(w,wi){
+  const cx=wpx(w.x*WW), cy=wpy(w.y*WH);
+  const rx=Math.max(3,(w.rx*WW/PS)|0), ry=Math.max(3,(w.ry*WH/PS)|0);
+  const wobMax=1+w.wob.reduce((s,h)=>s+h.a,0);
+  const mrx=Math.ceil(rx*wobMax), mry=Math.ceil(ry*wobMax);
+  if(cx+mrx<0||cx-mrx>pixW||cy+mry<0||cy-mry>pixH) return;
+  const edgeAt=(ang)=>waterEdgeMul(w.wob,ang);
 
   // Animated wave highlights: short bright dashes, upper half only
   const htick=Math.floor(gameTime*3);
@@ -2477,7 +2527,7 @@ function drawWater(w,wi){
     }
   }
 }
-function drawWaters(){ WATER_DEF.forEach((w,i)=>drawWater(w,i)); }
+function drawWaterSparkles(){ WATER_DEF.forEach((w,i)=>drawWaterSparkle(w,i)); }
 
 // ── Mountains ─────────────────────────────────────────────────
 // A mountain is 2-4 overlapping rounded sub-peaks (same idea as trees
@@ -3452,8 +3502,8 @@ function drawMapPreview(cv,d){
 function render(){
   updateGroundCache();
   pixCtx.drawImage(gndCv,0,0); // opaque, covers the whole canvas
-  drawRivers();
-  drawWaters();
+  drawRiverDots();
+  drawWaterSparkles();
   MOUNT_DEF.slice().sort((a,b)=>b.s-a.s).forEach(m=>drawHill(m));
   const moving=Math.abs(char.vx)>5||Math.abs(char.vy)>5;
   drawVegetation({wy:char.y,fn:()=>drawGnome(char.x,char.y,gameTime,moving)});
